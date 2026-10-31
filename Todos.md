@@ -2,7 +2,7 @@
 
 ## Stages
 
-- [ ] Print page size
+- [x] Print page size
 - [ ] Print number of tables
 - [ ] Print table names
 - [ ] Count rows in a table
