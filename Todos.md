@@ -3,7 +3,7 @@
 ## Stages
 
 - [x] Print page size
-- [ ] Print number of tables
+- [x] Print number of tables
 - [ ] Print table names
 - [ ] Count rows in a table
 - [ ] Read data from a single column
