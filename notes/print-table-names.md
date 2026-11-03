@@ -200,19 +200,35 @@ git push origin master
             ```
 - PEDAC: Data Structures And Algorithms
     - helper functions
-        - `parse_database_header(databas_file: file) -> hashmap`
+        - `parse_varint(data: bytes, offset: integer) -> integer`
+            - TODO!
+        - `parse_database_header(database_file: file) -> hashmap`
+            - optional: for aesthetics
+        - `parse_schema_cell_pointers(database_file: file) -> array[integer]`
             - TODO
-        - `parse_varint(varint: bytes) -> integer`
-            - TODO?
         - `parse_schema_table(database_file: file) -> hashmap`
             - TODO
-        - `parse_cell(database_file: file, offset: integer) -> hashmap`
+        - `parse_leaf_cell(database_file: file, offset: integer) -> hashmap`
             - TODO
+    - set int `DATABASE_HEADER_SIZE` to 100
+    - set int `LEAF_PAGE_HEADER_SIZE` to 8
+    - set int `INTERIOR_PAGE_HEADER_SIZE` to 12
     - set string `database_file_path` to `argv[1]`
     - set string `command` to `argv[2]`
+    - open file (descriptor) object `database_file` from path `database_file_path` as bytes with read permissions
     - if `command` is `.dbinfo`,
-        - open file (descriptor) object `database_file` from path `database_file_path` as bytes with read permissions
         - set int `cell_count_start_pos` to 100 + 1 + 2 = 103
         - set `cell_count_bytes` to bytes read from `database_file` in index (inclusive) range [`cell_count_start_pos`, `cell_count_start_pos` + 1]
         - set int `cell_count` to `cell_count_bytes` converted to text via UTF-8 encoding, then converted to an int
         - print to terminal the database page size and number of tables `cell_count`
+    - else if `command` is `.tables`,
+        - set array `table_names` to empty string array
+        - set array `cell_offsets` to `parse_schema_cell_pointers(database_file)`
+        - for each int `offset` in `cell_offsets`,
+            - set int `cell_start_pos` to `DATABASE_HEADER_SIZE` + `LEAF_PAGE_HEADER_SIZE` + `offset`
+            - set hashmap `cell_dict` to `parse_leaf_cell(database_file, 0)`
+            - set `table_name` to `cell_dict["record"]["body"]["tbl_name"]`
+            - if `table_name` is not string `sqlite_sequence`,
+                - append `table_name` to `table_names`
+        - print `table_names` as a string that joins each element with a space char ` `
+    - close file object at path `database_file`
