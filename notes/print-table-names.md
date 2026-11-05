@@ -153,9 +153,28 @@ git push origin master
         - how to determine if a page header's size is 8 or 12 Bytes?
             - assume it's 8 Bytes for now?
         - varints (variable-length integers) and how they are used by cells?
-            - TODO
+            - a varint uses 1 to 9 bytes, inclusive
+            - a variant is encoded in big-endian bytes
+            - a byte's leftmost bit or MSB (Most Significant Bit) determines if its following byte is part of the signed integer that represents the varint
+                - if MSB == 1, following byte is part of varint
+                - if MSB == 0, current byte is last byte of varint
+            - final signed integer is reconstructed from all byte(s) by concatenating, in order:
+                - lower / last 7 bits of bytes 1-8
+                - all bites of byte 9
         - bitwise operators to know and use?
-            - TODO
+            - AND; &; bit is 1 if both bits are 1, else bit is 0
+                - e.g., 5 & 3 -> 0001 -> 1
+            - OR; |; bit is 0 if both bits are 0, else bit is 1
+                - e.g., 5 | 3 -> 0111 -> 7
+            - XOR; ^; bit is 1 if both bits are different
+                - e.g., 5 ^ 3 -> 0110 -> 6
+            - NOT; ~; flip every bit
+                - e.g., ~5 -> -6
+            - left shift; <<; move bits left + enter zeroes on right (doubles value)
+                - e.g., 5 << 1 -> 1010 -> 10
+            - right shift; >>; move bits right + enter zeroes on left (divides value by 2^n)
+                - e.g., 5 >> 1 -> 0010 -> 2
+            - skip for now and using int -> binary string representation conversion hack
     - SQLite database = 1+ pages
         - `sqlite_schema` table
             - stores database schema
@@ -200,8 +219,25 @@ git push origin master
             ```
 - PEDAC: Data Structures And Algorithms
     - helper functions
-        - `parse_varint(data: bytes, offset: integer) -> integer`
-            - TODO!
+        - `parse_varint(data: bytes, offset: integer) -> array[integer]`
+            - set int `DATA_LEN` = length of `data`
+            - set int array `error_list` to `[INFINITY, INFINITY]`
+            - if `offset` <= `DATA_LEN`,
+                - return `error_list`
+            - set string array `varint_bits` empty
+            - set int `byte_count` to 1
+            - while `offset` < `DATA_LEN` and `byte_count` <= 9,
+                - set bytes `data_byte` to `data[offset]`
+                - set int `msb_int` to bit at `data_byte[0]` converted to an int
+                - set string `lower_bits_str` to 7 remaining bits of `data_byte` converted to a string
+                - if `byte_count` is 9,
+                    - append all bits of `data_byte` converted to string to `varints_bits`
+                - else,
+                    - append `lower_bits_str` to `res`
+                    - exit loop if `msb_int` is 0
+                - increment `byte_count` by 1
+            - set string `varint_bits_str` to all string elements of `varint_bits` joined together in order with empty space `` char
+            - return `varint_bits_str` as string bits converted to a signed integer
         - `parse_database_header(database_file: file) -> hashmap`
             - optional: for aesthetics
         - `parse_schema_cell_pointers(database_file: file) -> array[integer]`
