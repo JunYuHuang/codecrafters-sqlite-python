@@ -6,6 +6,7 @@ import sys
 DATABASE_HEADER_SIZE = 100
 CELL_SIZE_POS = DATABASE_HEADER_SIZE + 1 + 2
 LEAF_PAGE_HEADER_SIZE = 8
+PAGE_SIZE = 4096
 
 def parse_database_header(database_file: io.BufferedReader) -> dict:
     res = {}
@@ -82,13 +83,130 @@ def parse_schema_cell_pointers(database_file: io.BufferedReader) -> list[int]:
 
     return res
 
+# Serial Type Reference: https://www.sqlite.org/fileformat.html#record_format
+def parse_serial_type(serial_type: int) -> dict:
+    INF = float("inf")
+    SIGNED_INT = "signed_int"
+    INVALID_TYPE = "INVALID_TYPE"
+
+    print(f"Serial type: {serial_type}")
+
+    if type(serial_type) != int or serial_type < 0:
+        print(f"[Error]: Serial type {serial_type} is not valid")
+        return { "size": INF, "meaning": INVALID_TYPE }
+    
+    # `size` is in bytes
+    type_to_size_and_meaning = {
+        0: { "size": 0, "meaning": "null" },
+        1: { "size": 1, "meaning": SIGNED_INT },
+        2: { "size": 2, "meaning": SIGNED_INT },
+        3: { "size": 3, "meaning": SIGNED_INT },
+        4: { "size": 4, "meaning": SIGNED_INT },
+        5: { "size": 6, "meaning": SIGNED_INT },
+        6: { "size": 8, "meaning": SIGNED_INT },
+        7: { "size": 8, "meaning": "float" },
+        8: { "size": 0, "meaning": "zero" },
+        9: { "size": 0, "meaning": "one" },
+        10: { "size": INF, "meaning": "internal" },
+        11: { "size": INF, "meaning": "internal" },
+    }
+
+    if 0 <= serial_type <= 11:
+        return type_to_size_and_meaning[serial_type]
+    if serial_type >= 12 and serial_type % 2 == 0:
+        return { "size": ((serial_type - 12) // 2), "meaning": "blob" }
+    if serial_type >= 13 and serial_type % 2 != 0:
+        # assume UTF-8 text encoding unless proven otherwise
+        return { "size": ((serial_type - 13) // 2), "meaning": "text" }
+
+    print(f"[Error]: Serial type {serial_type} is not valid")
+    return { "size": INF, "meaning": INVALID_TYPE }
+
 # TODO: to implement + test
 def parse_leaf_cell(database_file: io.BufferedReader, offset: int) -> dict:
-    res = {}
+    res = {
+        "record_size": -1,
+        "rowid": -1,
+        "record": {
+            "header": { "header_size": -1 },
+            "body": {}
+        }
+    }
 
     database_file.seek(offset)
+    leaf_bytes = database_file.read(PAGE_SIZE)
 
-    # TODO: how much of the file to read into a buffer? page size - offset?
+    # Parse cell non-record values
+    varint_dict = parse_varint(leaf_bytes, offset)
+    res["record_size"] = varint_dict["varint"]
+    offset = varint_dict["offset"]
+    varint_dict = parse_varint(leaf_bytes, offset)
+    res["rowid"] = varint_dict["varint"]
+    offset = varint_dict["offset"]
+
+    # Parse cell record header values:
+    # `header_size`
+    varint_dict = parse_varint(leaf_bytes, offset)
+    res["record"]["header"]["header_size"] = varint_dict["varint"]
+    offset = varint_dict["offset"]
+    # `type`
+    varint_dict = parse_varint(leaf_bytes, offset)
+    res["record"]["header"]["type"] = varint_dict["varint"]
+    offset = varint_dict["offset"]
+    # `name`
+    varint_dict = parse_varint(leaf_bytes, offset)
+    res["record"]["header"]["name"] = varint_dict["varint"]
+    offset = varint_dict["offset"]
+    # `tbl_name`
+    varint_dict = parse_varint(leaf_bytes, offset)
+    res["record"]["header"]["tbl_name"] = varint_dict["varint"]
+    offset = varint_dict["offset"]
+    # `rootpage`
+    varint_dict = parse_varint(leaf_bytes, offset)
+    res["record"]["header"]["rootpage"] = varint_dict["varint"]
+    offset = varint_dict["offset"]
+    # `sql`
+    varint_dict = parse_varint(leaf_bytes, offset)
+    res["record"]["header"]["sql"] = varint_dict["varint"]
+    offset = varint_dict["offset"]
+
+    # Parse cell record body values:
+    # `type`
+    serial_type = res["record"]["header"]["type"]
+    serial_type_dict = parse_serial_type(serial_type)
+    database_file.seek(offset)
+    body_bytes = database_file.read(serial_type_dict["size"])
+    res["record"]["body"]["type"] = body_bytes.decode()
+    offset += serial_type_dict["size"]
+    # `name`
+    serial_type = res["record"]["header"]["name"]
+    serial_type_dict = parse_serial_type(serial_type)
+    database_file.seek(offset)
+    body_bytes = database_file.read(serial_type_dict["size"])
+    res["record"]["body"]["name"] = body_bytes.decode()
+    offset += serial_type_dict["size"]
+    # `tbl_name`
+    serial_type = res["record"]["header"]["tbl_name"]
+    serial_type_dict = parse_serial_type(serial_type)
+    database_file.seek(offset)
+    body_bytes = database_file.read(serial_type_dict["size"])
+    res["record"]["body"]["tbl_name"] = body_bytes.decode()
+    offset += serial_type_dict["size"]
+    # `rootpage`
+    serial_type = res["record"]["header"]["rootpage"]
+    serial_type_dict = parse_serial_type(serial_type)
+    database_file.seek(offset)
+    body_bytes = database_file.read(serial_type_dict["size"])
+    value = int.from_bytes(body_bytes, byteorder='big')
+    res["record"]["body"]["rootpage"] = value
+    offset += serial_type_dict["size"]
+    # `sql`
+    serial_type = res["record"]["header"]["sql"]
+    serial_type_dict = parse_serial_type(serial_type)
+    database_file.seek(offset)
+    body_bytes = database_file.read(serial_type_dict["size"])
+    res["record"]["body"]["sql"] = body_bytes.decode()
+    offset += serial_type_dict["size"]
 
     return res
 
@@ -120,6 +238,13 @@ def main() -> None:
     # res = parse_varint(varint_bytes_2, 7)
     # print(res)
 
+    # # TODO: test `parse_serial_type()`
+    # print(parse_serial_type(-1))
+    # print(parse_serial_type(8))
+    # print(parse_serial_type(23))
+    # print(parse_serial_type(27))
+    # print(parse_serial_type(199))
+
     if command == ".dbinfo":
         database_header_dict = parse_database_header(database_file)
         print(f"database page size: {database_header_dict["page_size"]}")
@@ -128,6 +253,10 @@ def main() -> None:
     elif command == ".tables":
         table_names = []
         cell_offsets: list[int] = parse_schema_cell_pointers(database_file)
+        print(cell_offsets)
+
+        offset_0 = cell_offsets[0]
+        print(parse_leaf_cell(database_file, offset_0))
         # for offset in cell_offsets:
         #     cell_dict = parse_leaf_cell(database_file, offset)
         #     table_name = cell_dict["record"]["body"]["tbl_name"]

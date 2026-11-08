@@ -201,6 +201,8 @@ git push origin master
             - right shift; >>; move bits right + enter zeroes on left (divides value by 2^n)
                 - e.g., 5 >> 1 -> 0010 -> 2
             - skip for now and using int -> binary string representation conversion hack
+        - in a cell's record / row part, how to get column name?
+            - ??
     - SQLite database = 1+ pages
         - `sqlite_schema` table
             - stores database schema
@@ -245,7 +247,7 @@ git push origin master
             ```
 - PEDAC: Data Structures And Algorithms
     - helper functions
-        - `parse_varint(data: bytes, offset: integer) -> array[integer]`
+        - `parse_varint(data: bytes, offset: integer) -> dict[string -> integer]`
             - set int `DATA_LEN` = length of `data`
             - set int array `error_list` to `[INFINITY, INFINITY]`
             - if `offset` <= `DATA_LEN`,
@@ -271,11 +273,88 @@ git push origin master
             - GGEZ done
         - `parse_schema_table(database_file: file) -> hashmap`
             - may not needed?
+        - `parse_serial_type(serial_type: integer) -> dict`
+            - done
         - `parse_leaf_cell(database_file: file, offset: integer) -> hashmap`
-            - ??
+            - move file cursor / pointer to position `offset` in `database_file`
+            - set bytes `leaf_bytes` to (`PAGE_SIZE` - `offset`) bytes read from current file cursor position
+            - set hashmap `res` empty
+            - set `res["record"]` to empty hashmap
+            - set `res["record"]["header"]` to empty hashmap
+            - parse non-record field values
+                - set hashmap `varint_dict` to `parse_varint(leaf_bytes, offset)`
+                - set key `res["record_size"]` to int `varint_dict["varint"]`
+                - set `offset` to `varint_dict["offset"]`
+                - set `varint_dict` to `parse_varint(leaf_bytes, offset)`
+                - set key `res["rowid"]` to int `varint_dict["varint"]`
+                - set `offset` to `varint_dict["offset"]`
+            - parse record header field values
+                - set `varint_dict` to `parse_varint(leaf_bytes, offset)`
+                - set key `res["record"]["header"]["header_size"]` to int `varint_dict["varint"]`
+                - set `offset` to `varint_dict["offset"]`
+                - parse 1st header serial type for column `type`
+                    - set `varint_dict` to `parse_varint(leaf_bytes, offset)`
+                    - set key `res["record"]["header"]["type"]` to int `varint_dict["varint"]`
+                    - set `offset` to `varint_dict["offset"]`
+                - parse 2nd header serial type for column `name`
+                    - set `varint_dict` to `parse_varint(leaf_bytes, offset)`
+                    - set key `res["record"]["header"]["name"]` to int `varint_dict["varint"]`
+                    - set `offset` to `varint_dict["offset"]`
+                - parse 3rd header serial type for column `tbl_name`
+                    - set `varint_dict` to `parse_varint(leaf_bytes, offset)`
+                    - set key `res["record"]["header"]["tbl_name"]` to int `varint_dict["varint"]`
+                    - set `offset` to `varint_dict["offset"]`
+                - parse 4th header serial type for column `rootpage`
+                    - set `varint_dict` to `parse_varint(leaf_bytes, offset)`
+                    - set key `res["record"]["header"]["rootpage"]` to int `varint_dict["varint"]`
+                    - set `offset` to `varint_dict["offset"]`
+                - parse 5th header serial type for column `sql`
+                    - set `varint_dict` to `parse_varint(leaf_bytes, offset)`
+                    - set key `res["record"]["header"]["sql"]` to int `varint_dict["varint"]`
+                    - set `offset` to `varint_dict["offset"]`
+            - parse record body field values
+                - set key `res["record"]["body"]` to empty hashmap
+                - parse 1st body value `type`
+                    - set int `serial_type` to `res["record"]["header"]["type"]`
+                    - set hashmap `serial_type_dict` to `parse_serial_type(serial_type)`
+                    - move file cursor / pointer to position `offset` in `database_file`
+                    - set bytes `body_bytes` to `serial_type_dict["size"]` bytes read from current file cursor position
+                    - set key `res["record"]["body"]["type"]` to `body_bytes` converted to a string
+                    - set `offset` to itself + `serial_type_dict["size"]`
+                - parse 2nd body value `name`
+                    - set int `serial_type` to `res["record"]["header"]["name"]`
+                    - set hashmap `serial_type_dict` to `parse_serial_type(serial_type)`
+                    - set `offset` to itself + `serial_type_dict["size"]`
+                    - move file cursor / pointer to position `offset` in `database_file`
+                    - set bytes `body_bytes` to `serial_type_dict["size"]` bytes read from current file cursor position
+                    - set key `res["record"]["body"]["name"]` to `body_bytes` converted to a string
+                    - set `offset` to itself + `serial_type_dict["size"]`
+                - parse 3rd body value `tbl_name`
+                    - set int `serial_type` to `res["record"]["header"]["tbl_name"]`
+                    - set hashmap `serial_type_dict` to `parse_serial_type(serial_type)`
+                    - set `offset` to itself + `serial_type_dict["size"]`
+                    - move file cursor / pointer to position `offset` in `database_file`
+                    - set bytes `body_bytes` to `serial_type_dict["size"]` bytes read from current file cursor position
+                    - set key `res["record"]["body"]["tbl_name"]` to `body_bytes` converted to a string
+                - parse 4th body value `rootpage`
+                    - set int `serial_type` to `res["record"]["header"]["rootpage"]`
+                    - set hashmap `serial_type_dict` to `parse_serial_type(serial_type)`
+                    - set `offset` to itself + `serial_type_dict["size"]`
+                    - move file cursor / pointer to position `offset` in `database_file`
+                    - set bytes `body_bytes` to `serial_type_dict["size"]` bytes read from current file cursor position
+                    - set key `res["record"]["body"]["rootpage"]` to `body_bytes` converted to an int
+                - parse 5th body value `sql`
+                    - set int `serial_type` to `res["record"]["header"]["sql"]`
+                    - set hashmap `serial_type_dict` to `parse_serial_type(serial_type)`
+                    - set `offset` to itself + `serial_type_dict["size"]`
+                    - move file cursor / pointer to position `offset` in `database_file`
+                    - set bytes `body_bytes` to `serial_type_dict["size"]` bytes read from current file cursor position
+                    - set key `res["record"]["body"]["sql"]` to `body_bytes` converted to a string
+            - return `res`
     - set int `DATABASE_HEADER_SIZE` to 100
     - set int `LEAF_PAGE_HEADER_SIZE` to 8
     - set int `INTERIOR_PAGE_HEADER_SIZE` to 12
+    - set int `PAGE_SIZE` to 4096
     - set string `database_file_path` to `argv[1]`
     - set string `command` to `argv[2]`
     - open file (descriptor) object `database_file` from path `database_file_path` as bytes with read permissions
