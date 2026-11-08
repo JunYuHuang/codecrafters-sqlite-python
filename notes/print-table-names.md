@@ -236,7 +236,7 @@ git push origin master
             database page size: 4096
             number of tables: 3
             ```
-    - ex.1: run `.tables` command
+    - ex.2: run `.tables` command
         - run in terminal:
             ```
             ./your_program.sh sample.db .tables

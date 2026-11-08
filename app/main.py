@@ -8,6 +8,11 @@ CELL_SIZE_POS = DATABASE_HEADER_SIZE + 1 + 2
 LEAF_PAGE_HEADER_SIZE = 8
 PAGE_SIZE = 4096
 
+# Page Header Constants
+PAGE_TYPE_SIZE = 1
+FIRST_FREE_BLOCK_SIZE = 2
+CELL_COUNT_SIZE = 2
+
 def parse_database_header(database_file: io.BufferedReader) -> dict:
     res = {}
 
@@ -205,6 +210,44 @@ def parse_leaf_cell(database_file: io.BufferedReader, offset: int) -> dict:
 
     return res
 
+# Assumes SQL statement follows format `SELECT COUNT(*) FROM <table>`
+def parse_sql(statement: str) -> dict:
+    res = {}
+    parts = statement.split(" ")
+    res["table"] = parts[-1]
+    return res
+
+def rootpage_of(database_file: io.BufferedReader, target_table: str) -> int:
+    if target_table.lower() == "sqlite_schema":
+        return 1
+
+    cell_offsets: list[int] = parse_schema_cell_pointers(database_file)
+    for offset in cell_offsets:
+        cell_dict = parse_leaf_cell(database_file, offset)
+        table_name = cell_dict["record"]["body"]["tbl_name"]
+        if table_name == target_table:
+            return cell_dict["record"]["body"]["rootpage"]
+
+    print(f"[Error]: Rootpage of table '{target_table}' not found")
+    return -1
+
+def parse_leaf_page_header(database_file: io.BufferedReader, rootpage: int) -> dict:
+    res = {}
+    database_offset = (rootpage - 1) * PAGE_SIZE
+    if rootpage == 1:
+        database_offset += DATABASE_HEADER_SIZE
+    database_file.seek(database_offset)
+    page_header_bytes = database_file.read(LEAF_PAGE_HEADER_SIZE)
+
+    cell_count_start_pos = PAGE_TYPE_SIZE + FIRST_FREE_BLOCK_SIZE
+    cell_count_bytes = page_header_bytes[
+        cell_count_start_pos:cell_count_start_pos + CELL_COUNT_SIZE
+    ]
+    cell_count_int = int.from_bytes(cell_count_bytes, byteorder='big')
+    res["cell_count"] = cell_count_int
+
+    return res
+
 def main() -> None:
     database_file_path = sys.argv[1]
     command = sys.argv[2]
@@ -224,6 +267,12 @@ def main() -> None:
                 table_names.append(table_name)
         res = " ".join(table_names)
         print(res)
+    # Assumes SQL statement follows format `SELECT COUNT(*) FROM <table>`
+    elif len(command) > 1:
+        sql_dict: dict = parse_sql(command)
+        rootpage: int = rootpage_of(database_file, sql_dict["table"])
+        leaf_page_header_dict = parse_leaf_page_header(database_file, rootpage)
+        print(leaf_page_header_dict["cell_count"])
     else:
         print(f"Invalid command: {command}")
 
