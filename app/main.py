@@ -33,8 +33,6 @@ def parse_varint(data: bytes, offset: int) -> dict:
     DATA_LEN = len(data)
     MAX_VARINT_BYTES = 9
 
-    # print(f"Bytes {data} is of length {DATA_LEN}")
-
     if offset >= DATA_LEN:
         print(f"[Error]: Offset {offset} in bytestream is out of bounds")
         return error_res
@@ -89,8 +87,6 @@ def parse_serial_type(serial_type: int) -> dict:
     SIGNED_INT = "signed_int"
     INVALID_TYPE = "INVALID_TYPE"
 
-    print(f"Serial type: {serial_type}")
-
     if type(serial_type) != int or serial_type < 0:
         print(f"[Error]: Serial type {serial_type} is not valid")
         return { "size": INF, "meaning": INVALID_TYPE }
@@ -122,7 +118,6 @@ def parse_serial_type(serial_type: int) -> dict:
     print(f"[Error]: Serial type {serial_type} is not valid")
     return { "size": INF, "meaning": INVALID_TYPE }
 
-# TODO: to implement + test
 def parse_leaf_cell(database_file: io.BufferedReader, offset: int) -> dict:
     res = {
         "record_size": -1,
@@ -133,7 +128,7 @@ def parse_leaf_cell(database_file: io.BufferedReader, offset: int) -> dict:
         }
     }
 
-    database_file.seek(offset)
+    database_file.seek(0)
     leaf_bytes = database_file.read(PAGE_SIZE)
 
     # Parse cell non-record values
@@ -215,55 +210,20 @@ def main() -> None:
     command = sys.argv[2]
     database_file: io.BufferedReader = open(database_file_path, "rb")
 
-    # # TODO: test varint_parser()
-    # varint_bytes_1 = int('10000001', base=2).to_bytes()
-    # varint_bytes_1 += int('00000001', base=2).to_bytes()
-    # varint_bytes_1 += int('10000001', base=2).to_bytes()
-    # res = parse_varint(varint_bytes_1, 0)
-    # print(res)
-
-    # varint_bytes_2 = int('10000001', base=2).to_bytes()
-    # varint_bytes_2 += int('10000001', base=2).to_bytes()
-    # varint_bytes_2 += int('10000001', base=2).to_bytes()
-    # varint_bytes_2 += int('10000001', base=2).to_bytes()
-    # varint_bytes_2 += int('10000001', base=2).to_bytes()
-    # varint_bytes_2 += int('10000001', base=2).to_bytes()
-    # varint_bytes_2 += int('10000001', base=2).to_bytes()
-    # varint_bytes_2 += int('10000001', base=2).to_bytes()
-    # varint_bytes_2 += int('00000001', base=2).to_bytes()
-    # varint_bytes_2 += int('00000001', base=2).to_bytes()
-    # res = parse_varint(varint_bytes_2, 0)
-    # print(res)
-
-    # res = parse_varint(varint_bytes_2, 7)
-    # print(res)
-
-    # # TODO: test `parse_serial_type()`
-    # print(parse_serial_type(-1))
-    # print(parse_serial_type(8))
-    # print(parse_serial_type(23))
-    # print(parse_serial_type(27))
-    # print(parse_serial_type(199))
-
     if command == ".dbinfo":
         database_header_dict = parse_database_header(database_file)
         print(f"database page size: {database_header_dict["page_size"]}")
         print(f"number of tables: {database_header_dict["cell_count"]}")
-    # TODO: to test
     elif command == ".tables":
         table_names = []
         cell_offsets: list[int] = parse_schema_cell_pointers(database_file)
-        print(cell_offsets)
-
-        offset_0 = cell_offsets[0]
-        print(parse_leaf_cell(database_file, offset_0))
-        # for offset in cell_offsets:
-        #     cell_dict = parse_leaf_cell(database_file, offset)
-        #     table_name = cell_dict["record"]["body"]["tbl_name"]
-        #     if table_name != "sqlite_sequence":
-        #         table_names.append(table_name)
-        # res = " ".join(table_names)
-        # print(res)
+        for offset in cell_offsets:
+            cell_dict = parse_leaf_cell(database_file, offset)
+            table_name = cell_dict["record"]["body"]["tbl_name"]
+            if table_name != "sqlite_sequence":
+                table_names.append(table_name)
+        res = " ".join(table_names)
+        print(res)
     else:
         print(f"Invalid command: {command}")
 

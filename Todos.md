@@ -4,7 +4,7 @@
 
 - [x] Print page size
 - [x] Print number of tables
-- [ ] Print table names
+- [x] Print table names
 - [ ] Count rows in a table
 - [ ] Read data from a single column
 - [ ] Read data from multiple columns

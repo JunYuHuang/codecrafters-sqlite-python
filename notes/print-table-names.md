@@ -276,8 +276,8 @@ git push origin master
         - `parse_serial_type(serial_type: integer) -> dict`
             - done
         - `parse_leaf_cell(database_file: file, offset: integer) -> hashmap`
-            - move file cursor / pointer to position `offset` in `database_file`
-            - set bytes `leaf_bytes` to (`PAGE_SIZE` - `offset`) bytes read from current file cursor position
+            - move file cursor / pointer to start position (0) in `database_file`
+            - set bytes `leaf_bytes` to `PAGE_SIZE` bytes read from current file cursor position
             - set hashmap `res` empty
             - set `res["record"]` to empty hashmap
             - set `res["record"]["header"]` to empty hashmap
