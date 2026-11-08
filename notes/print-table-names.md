@@ -161,6 +161,32 @@ git push origin master
             - final signed integer is reconstructed from all byte(s) by concatenating, in order:
                 - lower / last 7 bits of bytes 1-8
                 - all bites of byte 9
+            - bitwise operator formula for parsing bytes that compose a signed varint:
+                - applies to bytes 1 to 8 only; 9th byte uses all 8 bits for payload bits
+                - varint_new_byte = (varint_prev_byte << 7) | (varint_byte & 0x7F)
+                    - `<<` = bitwise left-shift
+                    - `|` = bitwise logical OR
+                    - `0x7F` = 127 = 0b01111111
+                - example:
+                    ```python
+                    byte_1 = 0b1000_0001    # 129
+                    byte_2 = 0b0000_0001    # 1
+                    result = 0
+
+                    # result = (0 << 7) | (0b1000_0001 & 0b0111_1111)
+                    # result = (0 * 2^7) | (0b0000_0001)
+                    # result = 0 | 1 = 1
+                    result = (result << 7) | (byte_1 & 0x7f)
+
+                    # result = (1 << 7) | (0b0000_0001 & 0b0111_1111)
+                    # result = (1 * 2^7) | (0b0000_0001)
+                    # result = 128 | 1
+                    # result = 0b1000_0000 | 0b0000_0001
+                    # result = 0b1000_0001 = 129
+                    result = (result << 7 ) | (byte_2 & 0x7f)
+
+                    print(result)   # 129
+                    ```
         - bitwise operators to know and use?
             - AND; &; bit is 1 if both bits are 1, else bit is 0
                 - e.g., 5 & 3 -> 0001 -> 1
@@ -236,16 +262,17 @@ git push origin master
                     - append `lower_bits_str` to `res`
                     - exit loop if `msb_int` is 0
                 - increment `byte_count` by 1
+                - increment `offset` by 1
             - set string `varint_bits_str` to all string elements of `varint_bits` joined together in order with empty space `` char
             - return `varint_bits_str` as string bits converted to a signed integer
         - `parse_database_header(database_file: file) -> hashmap`
             - optional: for aesthetics
         - `parse_schema_cell_pointers(database_file: file) -> array[integer]`
-            - TODO
+            - GGEZ done
         - `parse_schema_table(database_file: file) -> hashmap`
-            - TODO
+            - may not needed?
         - `parse_leaf_cell(database_file: file, offset: integer) -> hashmap`
-            - TODO
+            - ??
     - set int `DATABASE_HEADER_SIZE` to 100
     - set int `LEAF_PAGE_HEADER_SIZE` to 8
     - set int `INTERIOR_PAGE_HEADER_SIZE` to 12
@@ -261,8 +288,7 @@ git push origin master
         - set array `table_names` to empty string array
         - set array `cell_offsets` to `parse_schema_cell_pointers(database_file)`
         - for each int `offset` in `cell_offsets`,
-            - set int `cell_start_pos` to `DATABASE_HEADER_SIZE` + `LEAF_PAGE_HEADER_SIZE` + `offset`
-            - set hashmap `cell_dict` to `parse_leaf_cell(database_file, 0)`
+            - set hashmap `cell_dict` to `parse_leaf_cell(database_file, offset)`
             - set `table_name` to `cell_dict["record"]["body"]["tbl_name"]`
             - if `table_name` is not string `sqlite_sequence`,
                 - append `table_name` to `table_names`
