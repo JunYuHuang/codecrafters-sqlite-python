@@ -123,7 +123,9 @@ def parse_serial_type(serial_type: int) -> dict:
     print(f"[Error]: Serial type {serial_type} is not valid")
     return { "size": INF, "meaning": INVALID_TYPE }
 
-def parse_leaf_cell(database_file: io.BufferedReader, offset: int) -> dict:
+def parse_schema_leaf_cell(
+    database_file: io.BufferedReader, offset: int
+) -> dict:
     res = {
         "record_size": -1,
         "rowid": -1,
@@ -223,7 +225,7 @@ def rootpage_of(database_file: io.BufferedReader, target_table: str) -> int:
 
     cell_offsets: list[int] = parse_schema_cell_pointers(database_file)
     for offset in cell_offsets:
-        cell_dict = parse_leaf_cell(database_file, offset)
+        cell_dict = parse_schema_leaf_cell(database_file, offset)
         table_name = cell_dict["record"]["body"]["tbl_name"]
         if table_name == target_table:
             return cell_dict["record"]["body"]["rootpage"]
@@ -261,7 +263,7 @@ def main() -> None:
         table_names = []
         cell_offsets: list[int] = parse_schema_cell_pointers(database_file)
         for offset in cell_offsets:
-            cell_dict = parse_leaf_cell(database_file, offset)
+            cell_dict = parse_schema_leaf_cell(database_file, offset)
             table_name = cell_dict["record"]["body"]["tbl_name"]
             if table_name != "sqlite_sequence":
                 table_names.append(table_name)

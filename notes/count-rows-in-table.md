@@ -99,7 +99,7 @@ git push origin master
     - ex.3: run `SELECT COUNT(*) FROM <table>` command
         - run in terminal:
             ```
-            ./your_program.sh sample.db SELECT COUNT(*) FROM apples
+            ./your_program.sh sample.db "SELECT COUNT(*) FROM apples"
             ```
         - terminal output:
             ```
