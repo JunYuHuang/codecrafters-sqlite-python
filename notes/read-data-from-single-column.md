@@ -133,9 +133,9 @@ git push origin master
             - return empty string
         - `column_index_of(sql_create: string, target_column: string) -> integer`
             - returns 0-indexed column integer
-        - `parse_cell_pointers(database_file: file, rootpage: integer, offset: intger)`
+        - `parse_cell_pointers(database_file: file, rootpage: integer)`
             - TODO
-        - `parse_leaf_cell(database_file: file, rootpage: integer, offset: integer) -> hashmap`
+        - `parse_leaf_cell(database_file: file, offset: integer, rootpage: integer) -> hashmap`
             - TODO
     - set int `DATABASE_HEADER_SIZE` to 100
     - set int `LEAF_PAGE_HEADER_SIZE` to 8
@@ -154,5 +154,11 @@ git push origin master
         - set string `sql_create` to `sql_of(database_file, table)`
         - set int `column_index` to `column_index_of(sql_create, column)`
         - set string `rootpage` to `rootpage_of(database_file, table)`
-        - TODO
+        - set string array `rows` empty
+        - set int array `cell_offsets` to `parse_cell_pointers(database_file, offset)`
+        - for int `offset` in `cell_offsets`,
+            - set hashmap `cell_dict` to `parse_leaf_cell(database_file, offset, rootpage)`
+            - append string `cell_dict["record"]["body"][column_index]` to `rows`
+        - set string `rows_str` to joining each string in `rows` with a newline char `\n`
+        - print `rows_str`
     - close file object at path `database_file`
