@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 import io
+import re
 import sys
 import sqlparse
 
 DATABASE_HEADER_SIZE = 100
-CELL_SIZE_POS = DATABASE_HEADER_SIZE + 1 + 2
 LEAF_PAGE_HEADER_SIZE = 8
 PAGE_SIZE = 4096
 
@@ -20,7 +20,10 @@ def parse_database_header(database_file: io.BufferedReader) -> dict:
     page_size = int.from_bytes(database_file.read(2), byteorder="big")
     res["page_size"] = page_size
 
-    database_file.seek(CELL_SIZE_POS)
+    cell_count_start_pos = (
+        DATABASE_HEADER_SIZE + PAGE_TYPE_SIZE + FIRST_FREE_BLOCK_SIZE
+    )
+    database_file.seek(cell_count_start_pos)
     cell_count = int.from_bytes(database_file.read(2), byteorder="big")
     res["cell_count"] = cell_count
 
@@ -31,7 +34,6 @@ def int_to_binary_str(integer: int, bit_length: int = 1) -> str:
         bit_length = 1
     return format(integer, f"0{bit_length}b")
 
-# TODO: to test with more edge cases
 def parse_varint(data: bytes, offset: int) -> dict:
     INF = float("inf")
     error_res = { "varint": INF, "offset": INF, "varint_size": INF }
@@ -70,18 +72,19 @@ def parse_varint(data: bytes, offset: int) -> dict:
     varint_int = int("".join(varint_bits), base=2)
     return { "varint": varint_int, "offset": offset, "varint_size": byte_count }
 
-# TODO: rework to make it work with non-`sqlite_schema` table page headers
 def parse_cell_pointers(database_file: io.BufferedReader, rootpage: int = 1) -> list[int]:
-    # TODO: modify copied + pasted code:
     database_offset = (rootpage - 1) * PAGE_SIZE
     if rootpage == 1:
         database_offset += DATABASE_HEADER_SIZE
-    database_file.seek(database_offset)
+    cell_count_start_pos = (
+        database_offset + PAGE_TYPE_SIZE + FIRST_FREE_BLOCK_SIZE
+    )
+    database_file.seek(cell_count_start_pos)
+    cell_count = int.from_bytes(database_file.read(CELL_COUNT_SIZE), byteorder="big")
 
-    database_file.seek(CELL_SIZE_POS)
-    cell_count = int.from_bytes(database_file.read(2), byteorder="big")
-
-    cell_pointers_start_pos = DATABASE_HEADER_SIZE + LEAF_PAGE_HEADER_SIZE
+    cell_pointers_start_pos = LEAF_PAGE_HEADER_SIZE
+    if rootpage == 1:
+        cell_pointers_start_pos += DATABASE_HEADER_SIZE
     database_file.seek(cell_pointers_start_pos)
     pos = cell_pointers_start_pos
     res = []
@@ -231,8 +234,8 @@ def parse_leaf_cell(
             "body": {}
         }
     }
-
-    database_file.seek(0)
+    page_offset = (rootpage - 1) * PAGE_SIZE
+    database_file.seek(page_offset)
     leaf_bytes = database_file.read(PAGE_SIZE)
 
     # Parse cell non-record values
@@ -249,11 +252,10 @@ def parse_leaf_cell(
     res["record"]["header"]["header_size"] = varint_dict["varint"]
     offset = varint_dict["offset"]
     
-    # TODO
+
 
     # Parse cell record body values:
-    
-    # TODO
+
 
     return res
 
@@ -282,7 +284,6 @@ def rootpage_of(database_file: io.BufferedReader, target_table: str) -> int:
     print(f"[Error]: Rootpage of table '{target_table}' not found")
     return -1
 
-# TODO: to test
 def sql_of(database_file: io.BufferedReader, target_table: str) -> int:
     cell_offsets: list[int] = parse_cell_pointers(database_file)
     for offset in cell_offsets:
@@ -295,8 +296,10 @@ def sql_of(database_file: io.BufferedReader, target_table: str) -> int:
     return ""
 
 # TODO: to implement + test
-def column_index_of(sql_create: str, target_column: str) -> int:
-    return -1
+def columns_of(sql_create: str, target_column: str) -> (list | tuple):
+    # columns_count = commas_count + 1 ?
+
+    return sqlparse.parse(sql_create)
 
 def parse_leaf_page_header(database_file: io.BufferedReader, rootpage: int) -> dict:
     res = {}
@@ -334,12 +337,37 @@ def main() -> None:
                 table_names.append(table_name)
         res = " ".join(table_names)
         print(res)
-    # Assumes SQL statement follows format `SELECT COUNT(*) FROM <table>`
-    elif len(command) > 1:
+    elif re.match(r'^SELECT COUNT\(\*\) FROM \w+$', command):
         sql_dict: dict = parse_sql_select(command)
         rootpage: int = rootpage_of(database_file, sql_dict["table"])
         leaf_page_header_dict = parse_leaf_page_header(database_file, rootpage)
         print(leaf_page_header_dict["cell_count"])
+    elif re.match(r'^SELECT \w+ FROM \w+$', command):
+        sql_dict = parse_sql_select(command)
+        column: str = sql_dict["column"]
+        table: str = sql_dict["table"]
+        sql_create: str = sql_of(database_file, table)
+        # columns: list = columns_of(sql_create, column)
+        # print(columns)
+
+        # DEBUG: playing with `sqlparse` library
+        sql_statements = sqlparse.parse(sql_create)
+        # print(sql_statements[0].tokens)
+        print(sql_statements[0].tokens[-1])
+        columns_and_attributes = sql_statements[0].tokens[-1].tokens[3:-2]
+        tokens = []
+        for token in columns_and_attributes:
+            tokens.append(str(token))
+        print(tokens)
+
+        # rootpage: int = rootpage_of(database_file, table)
+        # rows = []
+        # cell_offsets: list[int] = parse_cell_pointers(database_file, offset, rootpage)
+        # for offset in cell_offsets:
+        #     cell_dict = parse_leaf_cell(database_file, offset, rootpage)
+        #     rows.append(cell_dict["record"]["body"][column_index])
+        # rows_str: str = "\n".join(rows)
+        # print(rows_str)
     else:
         print(f"Invalid command: {command}")
 

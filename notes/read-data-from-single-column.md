@@ -56,7 +56,8 @@ git push origin master
     - side effects:
         - TODO
     - questions
-        - TODO
+        - in a (leaf) cell's record, what says how many columns or serial type codes the record has?
+            - table of cell -> table.sql column's record / value
     - SQLite database = 1+ pages
         - `sqlite_schema` table
             - stores database schema
