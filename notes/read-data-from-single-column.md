@@ -57,7 +57,17 @@ git push origin master
         - TODO
     - questions
         - in a (leaf) cell's record, what says how many columns or serial type codes the record has?
-            - table of cell -> table.sql column's record / value
+            - ~~table of cell -> table.sql column's record / value~~
+            - record header size
+                - use int counter to track remaining bytes left in header as varint header serial type (bytes) are processed
+                - column count = int counter value + 1
+        - how to get column index of a named column in a table?
+            - get `sqlite_schema.sql` string value of the table
+            - get string array by splitting string value by comma `,` char
+            - iterate thru string array
+                - count `,` char occurrences in current iterated string
+                - if column name found as substring in current iterated string,
+                    - column index = count of `,` comma occurrences
     - SQLite database = 1+ pages
         - `sqlite_schema` table
             - stores database schema
