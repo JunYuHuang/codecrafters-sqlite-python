@@ -403,12 +403,12 @@ def main() -> None:
                 table_names.append(table_name)
         res = " ".join(table_names)
         print(res)
-    elif re.match(r'^SELECT COUNT\(\*\) FROM \w+$', command):
+    elif re.match(r'^select count\(\*\) from \w+$', command.lower()):
         sql_dict: dict = parse_sql_select(command)
         rootpage: int = rootpage_of(database_file, sql_dict["table"])
         leaf_page_header_dict = parse_leaf_page_header(database_file, rootpage)
         print(leaf_page_header_dict["cell_count"])
-    elif re.match(r'^SELECT \w+ FROM \w+$', command):
+    elif re.match(r'^select \w+ from \w+$', command.lower()):
         sql_dict = parse_sql_select(command)
         column: str = sql_dict["column"]
         table: str = sql_dict["table"]
