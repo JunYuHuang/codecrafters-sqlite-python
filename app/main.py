@@ -298,7 +298,7 @@ def parse_leaf_cell(
             value = int.from_bytes(body_bytes, byteorder="big")
         elif serial_type_dict["meaning"] == "float":
             # TODO: fix to convert bytes to 64-bit IEEE 754 float
-            # Current converts to 32-bit IEEE 754 float
+            # Currently converts to 32-bit IEEE 754 float
             value = struct.unpack('>f', body_bytes)
         elif serial_type_dict["meaning"] == "zero":
             value = 0
@@ -311,8 +311,9 @@ def parse_leaf_cell(
 
     return res
 
-# Assumes SQL statement follows format `SELECT COUNT(*) FROM <table>`
+# Assumes SQL statement format `select <count(*)|column> from <table>`
 def parse_sql_select(statement: str) -> dict:
+    statement = statement.lower()
     res = {}
     parts = statement.split(" ")
     assert(len(parts) == 4)
@@ -320,6 +321,20 @@ def parse_sql_select(statement: str) -> dict:
     res["action"] = parts[0]
     res["column"] = parts[1]
     res["table"] = parts[3]
+    return res
+
+# Assumes SQL statement format `select <column 1>, ...<column N> from <table>`
+def parse_sql_select_multi_column(statement: str) -> dict:
+    statement = statement.lower()
+    res = { "columns": [] }
+    columns_start_pos = len("select") + 1
+    columns_end_pos = statement.find(" from") - 1
+    columns = statement[columns_start_pos:columns_end_pos + 1].split(", ")
+    for column in columns:
+        res["columns"].append(column)
+    parts = statement.split(" ")
+    res["table"] = parts[-1]
+
     return res
 
 def rootpage_of(database_file: io.BufferedReader, target_table: str) -> int:
@@ -390,6 +405,7 @@ def main() -> None:
     database_header_dict = parse_database_header(database_file)
     PAGE_SIZE = database_header_dict["page_size"]
 
+    command = command.lower()
     if command == ".dbinfo":
         print(f"database page size: {database_header_dict["page_size"]}")
         print(f"number of tables: {database_header_dict["cell_count"]}")
@@ -403,12 +419,12 @@ def main() -> None:
                 table_names.append(table_name)
         res = " ".join(table_names)
         print(res)
-    elif re.match(r'^select count\(\*\) from \w+$', command.lower()):
+    elif re.match(r'^select count\(\*\) from \w+$', command):
         sql_dict: dict = parse_sql_select(command)
         rootpage: int = rootpage_of(database_file, sql_dict["table"])
         leaf_page_header_dict = parse_leaf_page_header(database_file, rootpage)
         print(leaf_page_header_dict["cell_count"])
-    elif re.match(r'^select \w+ from \w+$', command.lower()):
+    elif re.match(r'^select \w+ from \w+$', command):
         sql_dict = parse_sql_select(command)
         column: str = sql_dict["column"]
         table: str = sql_dict["table"]
@@ -420,6 +436,30 @@ def main() -> None:
         for offset in cell_offsets:
             cell_dict = parse_leaf_cell(database_file, offset, rootpage)
             rows.append(cell_dict["record"]["body"][column_index])
+        rows_str: str = "\n".join(rows)
+        print(rows_str)
+    elif re.match(r'^select \w+(\,\s\w+)+ from \w+$', command):
+        sql_dict = parse_sql_select_multi_column(command)
+        columns: list[str] = sql_dict["columns"]
+        table: str = sql_dict["table"]
+        sql_create: str = sql_of(database_file, table)
+
+        column_indices: list[int] = []
+        for column in columns:
+            column_index = column_index_of(sql_create, column)
+            column_indices.append(column_index)
+
+        rootpage: int = rootpage_of(database_file, table)
+        rows = []
+        cell_offsets: list[int] = parse_cell_pointers(database_file, rootpage)
+        for offset in cell_offsets:
+            cell_dict = parse_leaf_cell(database_file, offset, rootpage)
+            row: list[str] = []
+            for column_index in column_indices:
+                if row:
+                    row.append("|")
+                row.append(cell_dict["record"]["body"][column_index])
+            rows.append("".join(row))
         rows_str: str = "\n".join(rows)
         print(rows_str)
     else:
