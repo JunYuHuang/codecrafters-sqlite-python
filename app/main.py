@@ -8,6 +8,12 @@ import sqlparse
 # Sizes are in bytes
 DATABASE_HEADER_SIZE = 100
 LEAF_PAGE_HEADER_SIZE = 8
+
+# Database Header fields
+HEADER_STRING_SIZE = 16
+PAGE_SIZE_SIZE = 2
+
+# Overwritten based on database's actual page size
 PAGE_SIZE = 4096
 
 # Page Header Constants
@@ -19,8 +25,11 @@ CELL_POINTER_SIZE = 2
 def parse_database_header(database_file: io.BufferedReader) -> dict:
     res = {}
 
-    database_file.seek(16)  # Skip the first 16 bytes of the header
-    page_size = int.from_bytes(database_file.read(2), byteorder="big")
+    # Skip the first 16 bytes of the header
+    database_file.seek(HEADER_STRING_SIZE)  
+    page_size = int.from_bytes(
+        database_file.read(PAGE_SIZE_SIZE), byteorder="big"
+    )
     res["page_size"] = page_size
 
     cell_count_start_pos = (
@@ -54,7 +63,7 @@ def parse_varint(data: bytes, offset: int) -> dict:
         data_byte_str = int_to_binary_str(data_byte_int, 8)
 
         # msb = Most Significant Bit i.e., leftmost bit in a byte for a
-        # big-endian encoded signed integer
+        # big-endian encoded unsigned integer
         msb_int = int(data_byte_str[:1], 2)
 
         offset += 1
@@ -75,7 +84,9 @@ def parse_varint(data: bytes, offset: int) -> dict:
     varint_int = int("".join(varint_bits), base=2)
     return { "varint": varint_int, "offset": offset, "varint_size": byte_count }
 
-def parse_cell_pointers(database_file: io.BufferedReader, rootpage: int = 1) -> list[int]:
+def parse_cell_pointers(
+    database_file: io.BufferedReader, rootpage: int = 1
+) -> list[int]:
     page_offset = (rootpage - 1) * PAGE_SIZE
     if rootpage == 1:
         page_offset += DATABASE_HEADER_SIZE
@@ -83,7 +94,9 @@ def parse_cell_pointers(database_file: io.BufferedReader, rootpage: int = 1) -> 
         page_offset + PAGE_TYPE_SIZE + FIRST_FREE_BLOCK_SIZE
     )
     database_file.seek(cell_count_start_pos)
-    cell_count = int.from_bytes(database_file.read(CELL_COUNT_SIZE), byteorder="big")
+    cell_count = int.from_bytes(
+        database_file.read(CELL_COUNT_SIZE), byteorder="big"
+    )
 
     cell_pointers_start_pos = LEAF_PAGE_HEADER_SIZE
     if rootpage > 1:
@@ -229,9 +242,10 @@ def parse_schema_leaf_cell(
 
     return res
 
-# TODO: to test & fix
 def parse_leaf_cell(
-    database_file: io.BufferedReader, offset: int, rootpage: int
+    database_file: io.BufferedReader,
+    cell_offset: int,
+    rootpage: int
 ) -> dict:
     res = {
         "record_size": -1,
@@ -246,44 +260,33 @@ def parse_leaf_cell(
     leaf_bytes = database_file.read(PAGE_SIZE)
 
     # Parse cell non-record values
-    varint_dict = parse_varint(leaf_bytes, offset)
+    varint_dict = parse_varint(leaf_bytes, cell_offset)
     res["record_size"] = varint_dict["varint"]
-    offset = varint_dict["offset"]
-    varint_dict = parse_varint(leaf_bytes, offset)
+    cell_offset = varint_dict["offset"]
+    varint_dict = parse_varint(leaf_bytes, cell_offset)
     res["rowid"] = varint_dict["varint"]
-    offset = varint_dict["offset"]
+    cell_offset = varint_dict["offset"]
 
     # Parse cell record header values: `header_size` + serial type codes (columns)
-    varint_dict = parse_varint(leaf_bytes, offset)
+    varint_dict = parse_varint(leaf_bytes, cell_offset)
     res["record"]["header"]["header_size"] = varint_dict["varint"]
-    offset = varint_dict["offset"]
+    cell_offset = varint_dict["offset"]
 
     header_size: int = res["record"]["header"]["header_size"]
     header_bytes_left = header_size - varint_dict["varint_size"]
     serial_type_index = 0
-
-    print(f"[Debug]: Cell total size: {res["record_size"]}")
-    print(f"[Debug]: Cell header size: {header_size}")
-    print(f"[Debug]: Header bytes left: {header_bytes_left}")
-
-    # TODO: to fix bytes read?
     while header_bytes_left > 0:
-        varint_dict = parse_varint(leaf_bytes, offset)
+        varint_dict = parse_varint(leaf_bytes, cell_offset)
         res["record"]["header"][serial_type_index] = varint_dict["varint"]
-        offset = varint_dict["offset"]
+        cell_offset = varint_dict["offset"]
         serial_type_index += 1
         header_bytes_left -= varint_dict["varint_size"]
 
-    print(f"[Debug]: Parsed leaf cell (before body):\n{res}")
-
-    # TODO: fix value computation
     # Parse cell record body values:
     for column_value_index in range(serial_type_index):
-        print(f"[Debug]: At column value index {column_value_index}")
-
         serial_type: int = res["record"]["header"][column_value_index]
         serial_type_dict = parse_serial_type(serial_type)
-        database_file.seek(offset)
+        database_file.seek(page_offset + cell_offset)
         body_bytes = database_file.read(serial_type_dict["size"])
         value = None
         if serial_type_dict["meaning"] == "blob":
@@ -291,8 +294,11 @@ def parse_leaf_cell(
         elif serial_type_dict["meaning"] == "text":
             value = body_bytes.decode()
         elif serial_type_dict["meaning"] == "signed_int":
+            # TODO: handle negative integers (via two's complement)
             value = int.from_bytes(body_bytes, byteorder="big")
         elif serial_type_dict["meaning"] == "float":
+            # TODO: fix to convert bytes to 64-bit IEEE 754 float
+            # Current converts to 32-bit IEEE 754 float
             value = struct.unpack('>f', body_bytes)
         elif serial_type_dict["meaning"] == "zero":
             value = 0
@@ -301,9 +307,7 @@ def parse_leaf_cell(
         else:
             value = None
         res["record"]["body"][column_value_index] = value
-        offset += serial_type_dict["size"]
-
-    print(f"[Debug]: Parsed leaf cell:\n{res}")
+        cell_offset += serial_type_dict["size"]
 
     return res
 
@@ -343,6 +347,8 @@ def sql_of(database_file: io.BufferedReader, target_table: str) -> int:
     print(f"[Error]: SQL of table '{target_table}' not found")
     return ""
 
+# TODO: make less fragile (b/c SQL statements can have commas in more places)
+# e.g., use `sqlparse` module / library instead
 def column_index_of(sql_create: str, target_column: str) -> (list | tuple):
     target_column = target_column.lower()
     sql_create_parts: list[str] = sql_create.split(",")
@@ -357,7 +363,9 @@ def column_index_of(sql_create: str, target_column: str) -> (list | tuple):
     ))
     return -1
 
-def parse_leaf_page_header(database_file: io.BufferedReader, rootpage: int) -> dict:
+def parse_leaf_page_header(
+    database_file: io.BufferedReader, rootpage: int
+) -> dict:
     res = {}
     page_offset = (rootpage - 1) * PAGE_SIZE
     if rootpage == 1:
@@ -379,8 +387,10 @@ def main() -> None:
     command = sys.argv[2]
     database_file: io.BufferedReader = open(database_file_path, "rb")
 
+    database_header_dict = parse_database_header(database_file)
+    PAGE_SIZE = database_header_dict["page_size"]
+
     if command == ".dbinfo":
-        database_header_dict = parse_database_header(database_file)
         print(f"database page size: {database_header_dict["page_size"]}")
         print(f"number of tables: {database_header_dict["cell_count"]}")
     elif command == ".tables":
@@ -406,17 +416,12 @@ def main() -> None:
         column_index: int = column_index_of(sql_create, column)
         rootpage: int = rootpage_of(database_file, table)
         rows = []
-
         cell_offsets: list[int] = parse_cell_pointers(database_file, rootpage)
-        # print(f"[Debug]: Cell pointer offsets: {cell_offsets}")
-    
         for offset in cell_offsets:
             cell_dict = parse_leaf_cell(database_file, offset, rootpage)
-            # print(f"[Debug]: Parsed cell:\n{cell_dict}")
-            # rows.append(cell_dict["record"]["body"][column_index])
-
-        # rows_str: str = "\n".join(rows)
-        # print(rows_str)
+            rows.append(cell_dict["record"]["body"][column_index])
+        rows_str: str = "\n".join(rows)
+        print(rows_str)
     else:
         print(f"Invalid command: {command}")
 
