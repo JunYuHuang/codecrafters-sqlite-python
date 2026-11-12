@@ -444,6 +444,14 @@ def main() -> None:
                 sql_create, column_name
             )
 
+        where_column_pos = -1
+        where_value = ""
+        if "where_column" in sql_dict:
+            where_column_pos = column_index_of(
+                sql_create, sql_dict["where_column"]
+            )
+            where_value = sql_dict["where_value"]
+
         rootpage: int = rootpage_of(database_file, table)
         rows = []
         cell_offsets: list[int] = parse_cell_pointers(database_file, rootpage)
@@ -451,14 +459,7 @@ def main() -> None:
             cell_dict = parse_leaf_cell(database_file, offset, rootpage)
             record_dict = cell_dict["record"]["body"]
 
-            if (
-                "where_column" in sql_dict and 
-                (
-                    record_dict[col_name_to_pos[sql_dict["where_column"]]]
-                    !=
-                    sql_dict["where_value"]
-                )
-            ):
+            if where_value and record_dict[where_column_pos] != where_value:
                 continue
 
             row: list[str] = []
