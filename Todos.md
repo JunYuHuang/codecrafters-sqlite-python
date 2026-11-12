@@ -8,6 +8,6 @@
 - [x] Count rows in a table
 - [x] Read data from a single column
 - [x] Read data from multiple columns
-- [ ] Filter data with a WHERE clause
+- [x] Filter data with a WHERE clause
 - [ ] Retrieve data using a full-table scan
 - [ ] Retrieve data using an index

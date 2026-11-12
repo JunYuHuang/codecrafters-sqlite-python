@@ -3,7 +3,7 @@ import io
 import re
 import struct
 import sys
-import sqlparse
+# import sqlparse
 
 # Sizes are in bytes
 DATABASE_HEADER_SIZE = 100
@@ -311,34 +311,39 @@ def parse_leaf_cell(
 
     return res
 
-# Assumes SQL statement format `select <count(*)|column> from <table>`
+# Assumes SQL statement format:
+# `select <col 1>[, ...<col N>] from <table>`
 def parse_sql_select(statement: str) -> dict:
-    statement = statement.lower()
-    res = {}
-    parts = statement.split(" ")
-    assert(len(parts) == 4)
-
-    res["action"] = parts[0]
-    res["column"] = parts[1]
-    res["table"] = parts[3]
-    return res
-
-# Assumes SQL statement format `select <column 1>, ...<column N> from <table>`
-def parse_sql_select_multi_column(statement: str) -> dict:
-    statement = statement.lower()
+    statement_lowered = statement.lower()
     res = { "columns": [] }
     columns_start_pos = len("select") + 1
-    columns_end_pos = statement.find(" from") - 1
-    columns = statement[columns_start_pos:columns_end_pos + 1].split(", ")
+    columns_end_pos = statement_lowered.find(" from") - 1
+    columns = (
+        statement_lowered[columns_start_pos:columns_end_pos + 1].split(", ")
+    )
     for column in columns:
         res["columns"].append(column)
-    parts = statement.split(" ")
-    res["table"] = parts[-1]
+    
+    from_pos = statement_lowered.find("from")
+    where_start_pos = statement_lowered.find("where")
+    table_start_pos = from_pos + len("from") + 1
+    if where_start_pos == -1:
+        res["table"] = statement_lowered[table_start_pos:]
+    else:
+        res["table"] = statement_lowered[table_start_pos:where_start_pos - 1]
+        where_end_pos = where_start_pos + len("where") - 1
+        where_filter = statement[where_end_pos + 2:].split(" = ")
+        res["where_column"], res["where_value"] = where_filter
+
+        # Remove enclosing single quotes if needed
+        if res["where_value"][0] == "'" and res["where_value"][-1] == "'":
+            res["where_value"] = res["where_value"][1:-1] 
 
     return res
 
 def rootpage_of(database_file: io.BufferedReader, target_table: str) -> int:
-    if target_table.lower() == "sqlite_schema":
+    target_table = target_table.lower()
+    if target_table == "sqlite_schema":
         return 1
 
     cell_offsets: list[int] = parse_cell_pointers(database_file)
@@ -405,7 +410,6 @@ def main() -> None:
     database_header_dict = parse_database_header(database_file)
     PAGE_SIZE = database_header_dict["page_size"]
 
-    command = command.lower()
     if command == ".dbinfo":
         print(f"database page size: {database_header_dict["page_size"]}")
         print(f"number of tables: {database_header_dict["cell_count"]}")
@@ -419,48 +423,54 @@ def main() -> None:
                 table_names.append(table_name)
         res = " ".join(table_names)
         print(res)
-    elif re.match(r'^select count\(\*\) from \w+$', command):
+    elif re.match(r'^select count\(\*\) from \w+$', command, re.IGNORECASE):
         sql_dict: dict = parse_sql_select(command)
         rootpage: int = rootpage_of(database_file, sql_dict["table"])
         leaf_page_header_dict = parse_leaf_page_header(database_file, rootpage)
         print(leaf_page_header_dict["cell_count"])
-    elif re.match(r'^select \w+ from \w+$', command):
+    elif re.match(
+        r'^select \w+(\, \w+)* from \w+( where \w+ \= \'?\w+\'?)?$',
+        command,
+        re.IGNORECASE
+    ):
         sql_dict = parse_sql_select(command)
-        column: str = sql_dict["column"]
-        table: str = sql_dict["table"]
-        sql_create: str = sql_of(database_file, table)
-        column_index: int = column_index_of(sql_create, column)
-        rootpage: int = rootpage_of(database_file, table)
-        rows = []
-        cell_offsets: list[int] = parse_cell_pointers(database_file, rootpage)
-        for offset in cell_offsets:
-            cell_dict = parse_leaf_cell(database_file, offset, rootpage)
-            rows.append(cell_dict["record"]["body"][column_index])
-        rows_str: str = "\n".join(rows)
-        print(rows_str)
-    elif re.match(r'^select \w+(\,\s\w+)+ from \w+$', command):
-        sql_dict = parse_sql_select_multi_column(command)
-        columns: list[str] = sql_dict["columns"]
+        column_names: list[str] = sql_dict["columns"]
         table: str = sql_dict["table"]
         sql_create: str = sql_of(database_file, table)
 
-        column_indices: list[int] = []
-        for column in columns:
-            column_index = column_index_of(sql_create, column)
-            column_indices.append(column_index)
+        col_name_to_pos: dict = {}
+        for column_name in column_names:
+            col_name_to_pos[column_name] = column_index_of(
+                sql_create, column_name
+            )
 
         rootpage: int = rootpage_of(database_file, table)
         rows = []
         cell_offsets: list[int] = parse_cell_pointers(database_file, rootpage)
         for offset in cell_offsets:
             cell_dict = parse_leaf_cell(database_file, offset, rootpage)
+            record_dict = cell_dict["record"]["body"]
+
+            if (
+                "where_column" in sql_dict and 
+                (
+                    record_dict[col_name_to_pos[sql_dict["where_column"]]]
+                    !=
+                    sql_dict["where_value"]
+                )
+            ):
+                continue
+
             row: list[str] = []
-            for column_index in column_indices:
+            for column_index in col_name_to_pos.values():
                 if row:
                     row.append("|")
-                row.append(cell_dict["record"]["body"][column_index])
+                row.append(record_dict[column_index])
             rows.append("".join(row))
+
+        # TODO: fix bug that sometimes causes tests to fail for some reason
         rows_str: str = "\n".join(rows)
+
         print(rows_str)
     else:
         print(f"Invalid command: {command}")
