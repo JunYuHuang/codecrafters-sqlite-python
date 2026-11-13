@@ -408,7 +408,7 @@ def main() -> None:
     database_file: io.BufferedReader = open(database_file_path, "rb")
 
     database_header_dict = parse_database_header(database_file)
-    PAGE_SIZE = database_header_dict["page_size"]
+    nonlocal PAGE_SIZE = database_header_dict["page_size"]
 
     if command == ".dbinfo":
         print(f"database page size: {database_header_dict["page_size"]}")
