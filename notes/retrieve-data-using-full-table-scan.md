@@ -83,6 +83,20 @@ git push origin master
                     - if `key` < `target_value` < next key following `key`,
                         - go to current node's child between `key` and next key following `key` & recurse
                 - `target_value` is not in B-tree -> return null
+            - inorder traversal of a BST (Binary Search Tree) pseudocode:
+                ```
+                Inorder-Tree-Walk(x)
+                    if x != NIL then
+                        Inorder-Tree-Walk(x.left)
+                        visit node
+                        Inorder-Tree-Walk(x.right)
+                ```
+                - walk meaning?
+                    - go to node?
+                - visit node meaning?
+                    - add node's value to array
+            - how to traverse all nodes in a b-tree in inorder traversal so that nodes are visited in non-decreasing / ascending order?
+                - TODO
         - how are b-trees done in SQLite?
             - SQLite uses B+ trees: 2 b-tree types
                 - "table b-trees"
@@ -98,6 +112,7 @@ git push origin master
                             - (`K` + 1) pointers to child nodes (pages)
                         - pointers = 32-bit unsigned int page number of child
                         - `K` >= 2, except when page 1 (root node) is an interior node
+                    - `id` primary keys with `autoincrement` property point to cell's `rowid`
                 - "index b-trees"
                     - arbitrary-lengthed (int?) keys
                     - store 0 data
@@ -208,7 +223,7 @@ git push origin master
         - existing `parse_cell_pointers()`
             - rename to `parse_leaf_cell_pointers()`
             - rename `rootpage: integer` param to `page: integer`
-            - DONE
+            - TODO: update to retrieve the actual `id` value of primary key columns that have `integer primary key` properties (i.e., value for `cell[record][body][id]` is stored in cell `rowid`)
         - `parse_interior_page_header(database_file: file, page: integer) -> hashmap`
             - maybe not needed?
             - DONE
@@ -218,21 +233,29 @@ git push origin master
             - rename `rootpage: integer` param to `page: integer`
             - DONE
         - `parse_interior_cell(database_file: file, cell_offset: integer, page: integer) -> hashmap`
+            - DONE
+        - `is_page(database_file: file, page: integer) -> boolean`
+            - optional because every page number listed in a table interior page's cells always point to a valid page?
             - TODO
-        - `dfs_full_scan(database_file: file, options: hashmap, result: array) -> hashmap`
+        - `integer_primary_key_column_index(sql_create: str) -> integer`
+            - DONE
+        - `dfs_full_table_scan(database_file: file, params: hashmap, result: array) -> null`
+            - if not `is_page(database_file, params["page"])`,
+                - return
             - if current page is a table leaf page,
-                - get array of its cell offsets
-                - for each cell offset,
-                    - set hashmap `cell_dict` to `parse_leaf_cell()`
-                    - if `cell_dict`'s column value is not `options[where_value]`,
+                - set int array `cell_offsets` to `parse_leaf_cell_pointers(database_file, params["page"])`
+                - for each cell offset `offset` in `cell_offsets`,
+                    - set hashmap `cell_dict` to `parse_table_leaf_cell(database_file, offset, params["page"])`
+                    - if `cell_dict["record"]["body"][where_column_pos]` is not `params[where_value]`,
                         - skip to next iteration
-                    - push `cell_dict` values from selected columns to `result`
-            - if current page is a table interior oage,
-                - get array of its cell offsets
-                - for each cell offset,
-                    - set hashmap `cell_dict` to `parse_interior_cell()`
-                    - `dfs_full_scan()` recursively passing in `cell_dict`
-            - return `res` hashmap
+                    - push `cell_dict["record"]["body"]` values from selected column positions to `result`
+                - return
+            - if current page is a table interior page,
+                - set int array `cell_offsets` to `parse_interior_cell_pointers(database_file, params["page"])`
+                - for each cell offset `offset` in `cell_offsets`,
+                    - set hashmap `cell_dict` to `parse_table_interior_cell(database_file, offset, params["page"])`
+                    - set int `params["page"]` to `cell_dict["page_number"]`
+                    - `dfs_full_table_scan(database_file, params, result)`
     - set string `database_file_path` to `argv[1]`
     - set string `command` to `argv[2]`
     - open file (descriptor) object `database_file` from path `database_file_path` as bytes with read permissions
