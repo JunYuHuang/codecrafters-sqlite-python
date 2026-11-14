@@ -204,25 +204,34 @@ git push origin master
 - PEDAC: Data Structures And Algorithms
     - helper functions
         - `page_type(database_file: file, page: integer) -> str`
-            - TODO
+            - DONE
         - existing `parse_cell_pointers()`
             - rename to `parse_leaf_cell_pointers()`
             - rename `rootpage: integer` param to `page: integer`
+            - DONE
+        - `parse_interior_page_header(database_file: file, page: integer) -> hashmap`
+            - maybe not needed?
+            - DONE
         - `parse_interior_cell_pointers(database_file: file, page: integer) -> array[int]`
-            - TODO
+            - DONE
         - existing `parse_leaf_cell()`
             - rename `rootpage: integer` param to `page: integer`
+            - DONE
         - `parse_interior_cell(database_file: file, cell_offset: integer, page: integer) -> hashmap`
             - TODO
-        - `dfs_full_scan(database_file: file, options: hashmap) -> hashmap`
+        - `dfs_full_scan(database_file: file, options: hashmap, result: array) -> hashmap`
             - if current page is a table leaf page,
                 - get array of its cell offsets
                 - for each cell offset,
-                    - `parse_leaf_cell()`
+                    - set hashmap `cell_dict` to `parse_leaf_cell()`
+                    - if `cell_dict`'s column value is not `options[where_value]`,
+                        - skip to next iteration
+                    - push `cell_dict` values from selected columns to `result`
             - if current page is a table interior oage,
                 - get array of its cell offsets
                 - for each cell offset,
-                    - `parse_interior_cell()`
+                    - set hashmap `cell_dict` to `parse_interior_cell()`
+                    - `dfs_full_scan()` recursively passing in `cell_dict`
             - return `res` hashmap
     - set string `database_file_path` to `argv[1]`
     - set string `command` to `argv[2]`

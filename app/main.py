@@ -8,6 +8,7 @@ import sys
 # Sizes are in bytes
 DATABASE_HEADER_SIZE = 100
 LEAF_PAGE_HEADER_SIZE = 8
+INTERIOR_PAGE_HEADER_SIZE = 12
 
 # Database Header fields
 HEADER_STRING_SIZE = 16
@@ -20,6 +21,10 @@ PAGE_SIZE = 4096
 PAGE_TYPE_SIZE = 1
 FIRST_FREE_BLOCK_SIZE = 2
 CELL_COUNT_SIZE = 2
+CELL_CONTENT_AREA_SIZE = 2
+FRAGMENT_FREE_BYTES_SIZE = 1
+RIGHT_CHILD_PAGE_NUMBER_SIZE = 4
+
 CELL_POINTER_SIZE = 2
 
 def parse_database_header(database_file: io.BufferedReader) -> dict:
@@ -84,11 +89,36 @@ def parse_varint(data: bytes, offset: int) -> dict:
     varint_int = int("".join(varint_bits), base=2)
     return { "varint": varint_int, "offset": offset, "varint_size": byte_count }
 
-def parse_cell_pointers(
-    database_file: io.BufferedReader, rootpage: int = 1
+def page_type(database_file: io.BufferedReader, page: int) -> str:
+    if type(page) != int or page < 1:
+        print(f"[Error]: Invalid page number '{page}'")
+        return "INVALID_PAGE_TYPE"
+    
+    page_offset = (page - 1) * PAGE_SIZE
+    if page == 1:
+        page_offset += DATABASE_HEADER_SIZE
+    database_file.seek(page_offset)
+    page_type_int = int.from_bytes(
+        database_file.read(PAGE_TYPE_SIZE), byteorder="big"
+    )
+    int_to_str = {
+        0x0d: "table_leaf",
+        0x05: "table_interior",
+        0x0a: "index_leaf",
+        0x02: "index_interior"
+    }
+
+    if page_type_int not in int_to_str:
+        print(f"[Error]: Invalid page type '{page_type_int}'")
+        return "INVALID_PAGE_TYPE"
+
+    return int_to_str[page_type_int]
+
+def parse_leaf_cell_pointers(
+    database_file: io.BufferedReader, page: int = 1
 ) -> list[int]:
-    page_offset = (rootpage - 1) * PAGE_SIZE
-    if rootpage == 1:
+    page_offset = (page - 1) * PAGE_SIZE
+    if page == 1:
         page_offset += DATABASE_HEADER_SIZE
     cell_count_start_pos = (
         page_offset + PAGE_TYPE_SIZE + FIRST_FREE_BLOCK_SIZE
@@ -99,9 +129,53 @@ def parse_cell_pointers(
     )
 
     cell_pointers_start_pos = LEAF_PAGE_HEADER_SIZE
-    if rootpage > 1:
+    if page > 1:
         cell_pointers_start_pos += page_offset
-    if rootpage == 1:
+    if page == 1:
+        cell_pointers_start_pos += DATABASE_HEADER_SIZE
+    database_file.seek(cell_pointers_start_pos)
+    pos = cell_pointers_start_pos
+    res = []
+    for _ in range(cell_count):
+        database_file.seek(pos)
+        pointer_int = int.from_bytes(
+            database_file.read(CELL_POINTER_SIZE), byteorder="big"
+        )
+        res.append(pointer_int)
+        pos += CELL_POINTER_SIZE
+
+    return res
+
+# TODO: to test
+def parse_interior_cell_pointers(
+    database_file: io.BufferedReader, page: int = 1
+) -> list[int]:
+    page_offset = (page - 1) * PAGE_SIZE
+    if page == 1:
+        page_offset += DATABASE_HEADER_SIZE
+    cell_count_start_pos = (
+        page_offset + PAGE_TYPE_SIZE + FIRST_FREE_BLOCK_SIZE
+    )
+    database_file.seek(cell_count_start_pos)
+    cell_count = int.from_bytes(
+        database_file.read(CELL_COUNT_SIZE), byteorder="big"
+    )
+
+    # TODO: not sure if need right child page number?
+    right_child_page_number_start_pos = (
+        cell_count_start_pos + CELL_COUNT_SIZE +
+        CELL_CONTENT_AREA_SIZE + FRAGMENT_FREE_BYTES_SIZE
+    )
+    database_file.seek(right_child_page_number_start_pos)
+    right_child_page_number_int = int.from_bytes(
+        database_file.read(RIGHT_CHILD_PAGE_NUMBER_SIZE),
+        byteorder='big'
+    )
+
+    cell_pointers_start_pos = INTERIOR_PAGE_HEADER_SIZE
+    if page > 1:
+        cell_pointers_start_pos += page_offset
+    if page == 1:
         cell_pointers_start_pos += DATABASE_HEADER_SIZE
     database_file.seek(cell_pointers_start_pos)
     pos = cell_pointers_start_pos
@@ -245,7 +319,7 @@ def parse_schema_leaf_cell(
 def parse_leaf_cell(
     database_file: io.BufferedReader,
     cell_offset: int,
-    rootpage: int
+    page: int
 ) -> dict:
     res = {
         "record_size": -1,
@@ -255,7 +329,7 @@ def parse_leaf_cell(
             "body": {}
         }
     }
-    page_offset = (rootpage - 1) * PAGE_SIZE
+    page_offset = (page - 1) * PAGE_SIZE
     database_file.seek(page_offset)
     leaf_bytes = database_file.read(PAGE_SIZE)
 
@@ -311,6 +385,37 @@ def parse_leaf_cell(
 
     return res
 
+# TODO: to implement + test
+# Modify copy + pasted code from `parse_leaf_cell()`
+def parse_interior_cell(
+    database_file: io.BufferedReader,
+    cell_offset: int,
+    page: int
+) -> dict:
+    res = {
+        "record_size": -1,
+        "rowid": -1,
+        "record": {
+            "header": { "header_size": -1 },
+            "body": {}
+        }
+    }
+    page_offset = (page - 1) * PAGE_SIZE
+    database_file.seek(page_offset)
+    leaf_bytes = database_file.read(PAGE_SIZE)
+
+    # TODO: Verify if need to parse cell non-record values
+    varint_dict = parse_varint(leaf_bytes, cell_offset)
+    res["record_size"] = varint_dict["varint"]
+    cell_offset = varint_dict["offset"]
+    varint_dict = parse_varint(leaf_bytes, cell_offset)
+    res["rowid"] = varint_dict["varint"]
+    cell_offset = varint_dict["offset"]
+
+    # TODO
+
+    return res
+
 # Assumes SQL statement format:
 # `select <col 1>[, ...<col N>] from <table>`
 def parse_sql_select(statement: str) -> dict:
@@ -346,7 +451,7 @@ def rootpage_of(database_file: io.BufferedReader, target_table: str) -> int:
     if target_table == "sqlite_schema":
         return 1
 
-    cell_offsets: list[int] = parse_cell_pointers(database_file)
+    cell_offsets: list[int] = parse_leaf_cell_pointers(database_file)
     for offset in cell_offsets:
         cell_dict = parse_schema_leaf_cell(database_file, offset)
         table_name = cell_dict["record"]["body"]["tbl_name"]
@@ -357,7 +462,7 @@ def rootpage_of(database_file: io.BufferedReader, target_table: str) -> int:
     return -1
 
 def sql_of(database_file: io.BufferedReader, target_table: str) -> int:
-    cell_offsets: list[int] = parse_cell_pointers(database_file)
+    cell_offsets: list[int] = parse_leaf_cell_pointers(database_file)
     for offset in cell_offsets:
         cell_dict = parse_schema_leaf_cell(database_file, offset)
         table_name = cell_dict["record"]["body"]["tbl_name"]
@@ -384,11 +489,11 @@ def column_index_of(sql_create: str, target_column: str) -> (list | tuple):
     return -1
 
 def parse_leaf_page_header(
-    database_file: io.BufferedReader, rootpage: int
+    database_file: io.BufferedReader, page: int
 ) -> dict:
     res = {}
     page_offset = (rootpage - 1) * PAGE_SIZE
-    if rootpage == 1:
+    if page == 1:
         page_offset += DATABASE_HEADER_SIZE
     database_file.seek(page_offset)
     page_header_bytes = database_file.read(LEAF_PAGE_HEADER_SIZE)
@@ -402,20 +507,58 @@ def parse_leaf_page_header(
 
     return res
 
+# # TODO: to test -> maybe not needed?
+# def parse_interior_page_header(
+#     database_file: io.BufferedReader, page: int
+# ) -> dict:
+#     res = {}
+#     page_offset = (rootpage - 1) * PAGE_SIZE
+#     if page == 1:
+#         page_offset += DATABASE_HEADER_SIZE
+#     database_file.seek(page_offset)
+#     page_header_bytes = database_file.read(INTERIOR_PAGE_HEADER_SIZE)
+
+#     cell_count_start_pos = PAGE_TYPE_SIZE + FIRST_FREE_BLOCK_SIZE
+#     cell_count_bytes = page_header_bytes[
+#         cell_count_start_pos:cell_count_start_pos + CELL_COUNT_SIZE
+#     ]
+#     cell_count_int = int.from_bytes(cell_count_bytes, byteorder='big')
+#     res["cell_count"] = cell_count_int
+
+#     right_child_page_number_start_pos = (
+#         cell_count_start_pos + CELL_COUNT_SIZE +
+#         CELL_CONTENT_AREA_SIZE + FRAGMENT_FREE_BYTES_SIZE
+#     )
+#     right_child_page_number_bytes = page_header_bytes[
+#         right_child_page_number_start_pos:(
+#             right_child_page_number_start_pos +
+#             RIGHT_CHILD_PAGE_NUMBER_SIZE
+#         )
+#     ]
+#     right_child_page_number_int = int.from_bytes(
+#         right_child_page_number_bytes, byteorder='big'
+#     )
+#     res["right_child_page_number"] = right_child_page_number_int
+
+#     return res
+
 def main() -> None:
     database_file_path = sys.argv[1]
     command = sys.argv[2]
     database_file: io.BufferedReader = open(database_file_path, "rb")
 
     database_header_dict = parse_database_header(database_file)
-    nonlocal PAGE_SIZE = database_header_dict["page_size"]
+    global PAGE_SIZE
+    PAGE_SIZE = database_header_dict["page_size"]
+
+    # DEBUG: test
 
     if command == ".dbinfo":
         print(f"database page size: {database_header_dict["page_size"]}")
         print(f"number of tables: {database_header_dict["cell_count"]}")
     elif command == ".tables":
         table_names = []
-        cell_offsets: list[int] = parse_cell_pointers(database_file)
+        cell_offsets: list[int] = parse_leaf_cell_pointers(database_file)
         for offset in cell_offsets:
             cell_dict = parse_schema_leaf_cell(database_file, offset)
             table_name = cell_dict["record"]["body"]["tbl_name"]
@@ -454,7 +597,7 @@ def main() -> None:
 
         rootpage: int = rootpage_of(database_file, table)
         rows = []
-        cell_offsets: list[int] = parse_cell_pointers(database_file, rootpage)
+        cell_offsets: list[int] = parse_leaf_cell_pointers(database_file, rootpage)
         for offset in cell_offsets:
             cell_dict = parse_leaf_cell(database_file, offset, rootpage)
             record_dict = cell_dict["record"]["body"]
