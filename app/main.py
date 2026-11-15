@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass
 import io
 import re
@@ -111,7 +112,7 @@ def page_type(database_file: io.BufferedReader, page: int) -> str:
     }
 
     if page_type_int not in int_to_str:
-        print(f"[Error]: Invalid page type '{page_type_int}'")
+        print(f"[Error]: Invalid page type for page '{page_type_int}'")
         return "INVALID_PAGE_TYPE"
 
     return int_to_str[page_type_int]
@@ -148,7 +149,6 @@ def parse_leaf_cell_pointers(
 
     return res
 
-# TODO: to test
 def parse_interior_cell_pointers(
     database_file: io.BufferedReader, page: int = 1
 ) -> list[int]:
@@ -178,17 +178,6 @@ def parse_interior_cell_pointers(
         )
         res.append(pointer_int)
         pos += CELL_POINTER_SIZE
-
-    right_child_page_number_start_pos = (
-        cell_count_start_pos + CELL_COUNT_SIZE +
-        CELL_CONTENT_AREA_SIZE + FRAGMENT_FREE_BYTES_SIZE
-    )
-    database_file.seek(right_child_page_number_start_pos)
-    right_child_page_number_int = int.from_bytes(
-        database_file.read(RIGHT_CHILD_PAGE_NUMBER_SIZE),
-        byteorder='big'
-    )
-    res.append(right_child_page_number_int)
 
     return res
 
@@ -390,7 +379,6 @@ def parse_table_leaf_cell(
 
     return res
 
-# TODO: to test
 def parse_table_interior_cell(
     database_file: io.BufferedReader,
     cell_offset: int,
@@ -402,7 +390,7 @@ def parse_table_interior_cell(
     interior_bytes = database_file.read(PAGE_SIZE)
 
     # Parse child page number
-    page_number_bytes[cell_offset:cell_offset + PAGE_NUMBER_SIZE]
+    page_number_bytes = interior_bytes[cell_offset:cell_offset + PAGE_NUMBER_SIZE]
     res["page_number"] = int.from_bytes(page_number_bytes, byteorder='big')
     cell_offset += PAGE_NUMBER_SIZE
 
@@ -483,7 +471,6 @@ def column_index_of(sql_create: str, target_column: str) -> int:
     ))
     return -1
 
-# TODO: to test
 def integer_primary_key_column_index(sql_create: str) -> int:
     return column_index_of(sql_create, "integer primary key")
 
@@ -506,11 +493,32 @@ def parse_leaf_page_header(
 
     return res
 
-# TODO: to test
+def right_child_page_number(
+    database_file: io.BufferedReader, page: int
+) -> int:
+    if page_type(database_file, page) == "INVALID_PAGE_TYPE":
+        return -1
+
+    page_offset = (page - 1) * PAGE_SIZE
+    if page == 1:
+        page_offset += DATABASE_HEADER_SIZE
+    right_child_page_number_start_pos = (
+        page_offset + PAGE_TYPE_SIZE + FIRST_FREE_BLOCK_SIZE +
+        CELL_COUNT_SIZE + CELL_CONTENT_AREA_SIZE + FRAGMENT_FREE_BYTES_SIZE
+    )
+    database_file.seek(right_child_page_number_start_pos)
+    return int.from_bytes(
+        database_file.read(RIGHT_CHILD_PAGE_NUMBER_SIZE),
+        byteorder='big'
+    )
+
 def dfs_full_table_scan(
     database_file: io.BufferedReader, params: dict, result_rows: list
 ) -> None:
     page_type_str = page_type(database_file, params["page"])
+
+    if page_type_str != "table_leaf" and page_type_str != "table_interior":
+        return
 
     if page_type_str == "table_leaf":
         cell_offsets: list[int] = parse_leaf_cell_pointers(
@@ -533,7 +541,7 @@ def dfs_full_table_scan(
             for column_index in params["column_indices"]:
                 if row:
                     row.append("|")
-                row.append(record_dict[column_index])
+                row.append(str(record_dict[column_index]))
             result_rows.append("".join(row))
         return
 
@@ -541,12 +549,22 @@ def dfs_full_table_scan(
         cell_offsets: list[int] = parse_interior_cell_pointers(
             database_file, params["page"]
         )
+        old_page = copy.copy(params["page"])
         for offset in cell_offsets:
             cell_dict = parse_table_interior_cell(
-                database_file, offset, params["page"]
+                database_file, offset, old_page
             )
-            params["page"] = cell_dict["page_number"]
-            dfs_full_table_scan(database_file, params, result_rows)
+            new_params = copy.copy(params)
+            new_params["page"] = cell_dict["page_number"]
+            dfs_full_table_scan(database_file, new_params, result_rows)
+
+        rightmost_page: int = right_child_page_number(
+            database_file, old_page
+        )
+        new_params = copy.copy(params)
+        new_params["page"] = rightmost_page
+        dfs_full_table_scan(database_file, new_params, result_rows)
+
 
 def main() -> None:
     database_file_path = sys.argv[1]
@@ -570,13 +588,13 @@ def main() -> None:
                 table_names.append(table_name)
         res = " ".join(table_names)
         print(res)
-    elif re.match(r'^select count\(\*\) from \w+$', command, re.IGNORECASE):
+    elif re.match(r'^SELECT COUNT\(\*\) FROM \w+$', command, re.IGNORECASE):
         sql_dict: dict = parse_sql_select(command)
         rootpage: int = rootpage_of(database_file, sql_dict["table"])
         leaf_page_header_dict = parse_leaf_page_header(database_file, rootpage)
         print(leaf_page_header_dict["cell_count"])
     elif re.match(
-        r'^select \w+(\, \w+)* from \w+( where \w+ \= \'?\w+\'?)?$',
+        r'^SELECT \w+(\, \w+)* FROM \w+( WHERE \w+ \= \'?.+\'?)?$',
         command,
         re.IGNORECASE
     ):
@@ -605,29 +623,14 @@ def main() -> None:
 
         params = {
             "page": rootpage,
-            "column_indices": col_name_to_pos.values(),
+            "column_indices": list(col_name_to_pos.values()),
             "where_column_pos": where_column_pos,
             "where_value": where_value,
             "integer_primary_key_column_pos": rowid_column_pos
         }
         rows = []
         dfs_full_table_scan(database_file, params, rows)
-
-        # rows = []
-        # cell_offsets: list[int] = parse_leaf_cell_pointers(database_file, rootpage)
-        # for offset in cell_offsets:
-        #     cell_dict = parse_table_leaf_cell(database_file, offset, rootpage)
-        #     record_dict = cell_dict["record"]["body"]
-
-        #     if where_value and record_dict[where_column_pos] != where_value:
-        #         continue
-
-        #     row: list[str] = []
-        #     for column_index in col_name_to_pos.values():
-        #         if row:
-        #             row.append("|")
-        #         row.append(record_dict[column_index])
-        #     rows.append("".join(row))
+        # print(rows)
 
         # TODO: fix bug that sometimes causes tests to fail for some reason
         rows_str: str = "\n".join(rows)
