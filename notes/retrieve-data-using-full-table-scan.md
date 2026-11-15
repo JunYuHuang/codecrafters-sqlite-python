@@ -239,6 +239,10 @@ git push origin master
             - TODO
         - `integer_primary_key_column_index(sql_create: str) -> integer`
             - DONE
+        - `column_names_to_indices(sql_create: string) -> hashmap`
+            - returns a hashmap that maps each column name string in `sql_create` to its integer index / position
+            - hashmap also has entry for which column is the primary key
+                - e.g., `integer_primary_key_pos` -> 0
         - `dfs_full_table_scan(database_file: file, params: hashmap, result: array) -> null`
             - if not `is_page(database_file, params["page"])`,
                 - return

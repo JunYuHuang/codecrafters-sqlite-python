@@ -201,8 +201,15 @@ def parse_serial_type(serial_type: int) -> dict:
         5: { "size": 6, "meaning": SIGNED_INT },
         6: { "size": 8, "meaning": SIGNED_INT },
         7: { "size": 8, "meaning": "float" },
+
+        # Applies to SQLite schema format 4+:
+        # https://www.sqlite.org/fileformat2.html#schemaformat
         8: { "size": 0, "meaning": "zero" },
+
+        # Applies to SQLite schema format 4+:
+        # https://www.sqlite.org/fileformat2.html#schemaformat
         9: { "size": 0, "meaning": "one" },
+
         10: { "size": INF, "meaning": "internal" },
         11: { "size": INF, "meaning": "internal" },
     }
@@ -459,24 +466,26 @@ def sql_of(database_file: io.BufferedReader, target_table: str) -> int:
     return ""
 
 # TODO: make less fragile (b/c SQL statements can have commas in more places)
-# e.g., use `sqlparse` module / library instead
-def column_index_of(sql_create: str, target_column: str) -> int:
-    target_column = target_column.lower()
-    sql_create_parts: list[str] = sql_create.split(",")
+def column_names_to_indices(sql_create: str) -> dict:
+    res = {}
+    sql_create = sql_create.replace("\n", "").replace("\t", "")
+    sql_create_parts = sql_create.split(",")
     sql_create_parts_len = len(sql_create_parts)
     for i in range(sql_create_parts_len):
-        if sql_create_parts[i].find(target_column) != -1:
-            return i
-
-    print((
-        f"[Error]: Column '{target_column}' does not exist in table created" +
-        f"by SQL DDL:\n{sql_create}"
-    ))
-    return -1
-
-# TODO: fix bug with this??
-def integer_primary_key_column_index(sql_create: str) -> int:
-    return column_index_of(sql_create, "integer primary key")
+        name_start = (sql_create_parts[i].find("(") + 1) if i == 0 else 0
+        while (
+            sql_create_parts[i][name_start] == " " and
+            name_start < len(sql_create_parts[i])
+        ):
+            name_start += 1
+        name_end = sql_create_parts[i].find(" ", name_start) - 1
+        name = sql_create_parts[i][name_start:name_end + 1]
+        res[name] = i
+        
+        primary_key_pos = sql_create_parts[i].find("integer primary key")
+        if primary_key_pos != -1:
+            res["_integer_primary_key"] = i
+    return res
 
 def parse_leaf_page_header(
     database_file: io.BufferedReader, page: int
@@ -602,40 +611,34 @@ def main() -> None:
         command,
         re.IGNORECASE
     ):
+        # Parse SELECT command components
         sql_dict = parse_sql_select(command)
         column_names: list[str] = sql_dict["columns"]
         table: str = sql_dict["table"]
         sql_create: str = sql_of(database_file, table)
 
-        col_name_to_pos: dict = {}
-        for column_name in column_names:
-            col_name_to_pos[column_name] = column_index_of(
-                sql_create, column_name
-            )
-
+        # Prep arguments for recursive call
+        rootpage: int = rootpage_of(database_file, table)
+        col_name_to_pos: dict = column_names_to_indices(sql_create)
+        column_indices: list[int] = []
+        for column in sql_dict["columns"]:
+            column_indices.append(col_name_to_pos[column])
         where_column_pos = -1
         where_value = None
         if "where_column" in sql_dict:
-            where_column_pos = column_index_of(
-                sql_create, sql_dict["where_column"]
-            )
+            where_column_pos = col_name_to_pos[sql_dict["where_column"]]
             where_value = sql_dict["where_value"]
-
-        rootpage: int = rootpage_of(database_file, table)
-
-        # TODO: fix bug with this?
-        rowid_column_pos: int = integer_primary_key_column_index(sql_create)
+        rowid_column_pos = col_name_to_pos["_integer_primary_key"]
 
         params = {
             "page": rootpage,
-            "column_indices": list(col_name_to_pos.values()),
+            "column_indices": column_indices,
             "where_column_pos": where_column_pos,
             "where_value": where_value,
             "integer_primary_key_column_pos": rowid_column_pos
         }
         rows = []
         dfs_full_table_scan(database_file, params, rows)
-        # print(rows)
 
         # TODO: fix bug that sometimes causes tests to fail for some reason
         rows_str: str = "\n".join(rows)
