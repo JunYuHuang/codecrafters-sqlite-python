@@ -373,7 +373,10 @@ def parse_table_leaf_cell(
         else:
             value = None
         res["record"]["body"][column_value_index] = value
-        if column_value_index == integer_primary_key_column_pos:
+        if (
+            integer_primary_key_column_pos != -1 and
+            column_value_index == integer_primary_key_column_pos
+        ):
             res["record"]["body"][column_value_index] = res["rowid"]
         cell_offset += serial_type_dict["size"]
 
@@ -471,6 +474,7 @@ def column_index_of(sql_create: str, target_column: str) -> int:
     ))
     return -1
 
+# TODO: fix bug with this??
 def integer_primary_key_column_index(sql_create: str) -> int:
     return column_index_of(sql_create, "integer primary key")
 
@@ -619,6 +623,7 @@ def main() -> None:
 
         rootpage: int = rootpage_of(database_file, table)
 
+        # TODO: fix bug with this?
         rowid_column_pos: int = integer_primary_key_column_index(sql_create)
 
         params = {

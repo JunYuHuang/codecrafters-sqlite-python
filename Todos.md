@@ -9,5 +9,5 @@
 - [x] Read data from a single column
 - [x] Read data from multiple columns
 - [x] Filter data with a WHERE clause
-- [x] Retrieve data using a full-table scan
+- [ ] Retrieve data using a full-table scan
 - [ ] Retrieve data using an index
