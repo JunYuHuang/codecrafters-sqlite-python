@@ -28,7 +28,10 @@ RIGHT_CHILD_PAGE_NUMBER_SIZE = 4
 
 # Cell constants
 CELL_POINTER_SIZE = 2
-PAGE_NUMBER_SIZE = 4
+LEFT_PAGE_NUMBER_SIZE = 4
+
+# Misc
+CLI_ARGUMENTS_COUNT = 3
 
 def parse_database_header(database_file: io.BufferedReader) -> dict:
     res = {}
@@ -389,23 +392,160 @@ def parse_table_leaf_cell(
 
     return res
 
+# TODO: to test (OK?)
+def parse_index_leaf_cell(
+    database_file: io.BufferedReader,
+    cell_offset: int,
+    page: int,
+    integer_primary_key_column_pos: int = -1
+) -> dict:
+    res = {
+        "record_size": -1,
+        "record": {
+            "header": { "header_size": -1 },
+            "body": {}
+        }
+    }
+    page_offset = (page - 1) * PAGE_SIZE
+    database_file.seek(page_offset)
+    leaf_bytes = database_file.read(PAGE_SIZE)
+
+    # Parse cell non-record values
+    varint_dict = parse_varint(leaf_bytes, cell_offset)
+    res["record_size"] = varint_dict["varint"]
+    cell_offset = varint_dict["offset"]
+
+    # Parse cell record header values: `header_size` + serial type codes (columns)
+    varint_dict = parse_varint(leaf_bytes, cell_offset)
+    res["record"]["header"]["header_size"] = varint_dict["varint"]
+    cell_offset = varint_dict["offset"]
+
+    header_size: int = res["record"]["header"]["header_size"]
+    header_bytes_left = header_size - varint_dict["varint_size"]
+    serial_type_index = 0
+    while header_bytes_left > 0:
+        varint_dict = parse_varint(leaf_bytes, cell_offset)
+        res["record"]["header"][serial_type_index] = varint_dict["varint"]
+        cell_offset = varint_dict["offset"]
+        serial_type_index += 1
+        header_bytes_left -= varint_dict["varint_size"]
+
+    # Parse cell record body values:
+    for column_value_index in range(serial_type_index):
+        serial_type: int = res["record"]["header"][column_value_index]
+        serial_type_dict = parse_serial_type(serial_type)
+        database_file.seek(page_offset + cell_offset)
+        body_bytes = database_file.read(serial_type_dict["size"])
+        value = None
+        if serial_type_dict["meaning"] == "blob":
+            value = body_bytes
+        elif serial_type_dict["meaning"] == "text":
+            value = body_bytes.decode()
+        elif serial_type_dict["meaning"] == "signed_int":
+            # TODO: handle negative integers (via two's complement)
+            value = int.from_bytes(body_bytes, byteorder="big")
+        elif serial_type_dict["meaning"] == "float":
+            # TODO: fix to convert bytes to 64-bit IEEE 754 float
+            # Currently converts to 32-bit IEEE 754 float
+            value = struct.unpack('>f', body_bytes)
+        elif serial_type_dict["meaning"] == "zero":
+            value = 0
+        elif serial_type_dict["meaning"] == "one":
+            value = 1
+        else:
+            value = None
+        res["record"]["body"][column_value_index] = value
+        cell_offset += serial_type_dict["size"]
+
+    return res
+
 def parse_table_interior_cell(
     database_file: io.BufferedReader,
     cell_offset: int,
     page: int
 ) -> dict:
-    res = { "page_number": -1, "rowid": - 1 }
+    res = { "left_page_number": -1, "rowid": - 1 }
     page_offset = (page - 1) * PAGE_SIZE
     database_file.seek(page_offset)
     interior_bytes = database_file.read(PAGE_SIZE)
 
     # Parse child page number
-    page_number_bytes = interior_bytes[cell_offset:cell_offset + PAGE_NUMBER_SIZE]
-    res["page_number"] = int.from_bytes(page_number_bytes, byteorder='big')
-    cell_offset += PAGE_NUMBER_SIZE
+    page_number_bytes = interior_bytes[cell_offset:cell_offset + LEFT_PAGE_NUMBER_SIZE]
+    res["left_page_number"] = int.from_bytes(page_number_bytes, byteorder='big')
+    cell_offset += LEFT_PAGE_NUMBER_SIZE
 
     varint_dict = parse_varint(interior_bytes, cell_offset)
     res["rowid"] = varint_dict["varint"]
+
+    return res
+
+# TODO: to test (OK?)
+def parse_index_interior_cell(
+    database_file: io.BufferedReader,
+    cell_offset: int,
+    page: int
+) -> dict:
+    res = {
+        "left_page_number": -1,
+        "record_size": -1,
+        "record": {
+            "header": { "header_size": -1 },
+            "body": {}
+        }
+    }
+    page_offset = (page - 1) * PAGE_SIZE
+    database_file.seek(page_offset)
+    interior_bytes = database_file.read(PAGE_SIZE)
+
+    # Parse cell non-record values
+    page_number_bytes = interior_bytes[cell_offset:cell_offset + LEFT_PAGE_NUMBER_SIZE]
+    res["left_page_number"] = int.from_bytes(page_number_bytes, byteorder='big')
+    cell_offset += LEFT_PAGE_NUMBER_SIZE
+    varint_dict = parse_varint(interior_bytes, cell_offset)
+    res["record_size"] = varint_dict["varint"]
+    cell_offset = varint_dict["offset"]
+
+    # Parse cell record header values
+    varint_dict = parse_varint(interior_bytes, cell_offset)
+    res["record"]["header"]["header_size"] = varint_dict["varint"]
+    cell_offset = varint_dict["offset"]
+
+    header_size: int = res["record"]["header"]["header_size"]
+    header_bytes_left = header_size - varint_dict["varint_size"]
+    serial_type_index = 0
+    while header_bytes_left > 0:
+        varint_dict = parse_varint(interior_bytes, cell_offset)
+        res["record"]["header"][serial_type_index] = varint_dict["varint"]
+        cell_offset = varint_dict["offset"]
+        serial_type_index += 1
+        header_bytes_left -= varint_dict["varint_size"]
+
+    # Parse cell record body values
+    for column_value_index in range(serial_type_index):
+        serial_type: int = res["record"]["header"][column_value_index]
+        serial_type_dict = parse_serial_type(serial_type)
+        database_file.seek(page_offset + cell_offset)
+        body_bytes = database_file.read(serial_type_dict["size"])
+        value = None
+        if serial_type_dict["meaning"] == "blob":
+            value = body_bytes
+        elif serial_type_dict["meaning"] == "text":
+            value = body_bytes.decode()
+        elif serial_type_dict["meaning"] == "signed_int":
+            # TODO: handle negative integers (via two's complement)
+            value = int.from_bytes(body_bytes, byteorder="big")
+        elif serial_type_dict["meaning"] == "float":
+            # TODO: fix to convert bytes to 64-bit IEEE 754 float
+            # Currently converts to 32-bit IEEE 754 float
+            value = struct.unpack('>f', body_bytes)
+        elif serial_type_dict["meaning"] == "zero":
+            value = 0
+        elif serial_type_dict["meaning"] == "one":
+            value = 1
+        else:
+            value = None
+        res["record"]["body"][column_value_index] = value
+        cell_offset += serial_type_dict["size"]
 
     return res
 
@@ -439,7 +579,11 @@ def parse_sql_select(statement: str) -> dict:
 
     return res
 
-def rootpage_of(database_file: io.BufferedReader, target_table: str) -> int:
+def rootpage_of(
+    database_file: io.BufferedReader,
+    target_table: str,
+    target_type: str = "table"
+) -> int:
     target_table = target_table.lower()
     if target_table == "sqlite_schema":
         return 1
@@ -448,22 +592,40 @@ def rootpage_of(database_file: io.BufferedReader, target_table: str) -> int:
     for offset in cell_offsets:
         cell_dict = parse_schema_leaf_cell(database_file, offset)
         table_name = cell_dict["record"]["body"]["tbl_name"]
-        if table_name == target_table:
+        type_name = cell_dict["record"]["body"]["type"]
+        if table_name == target_table and type_name == target_type:
             return cell_dict["record"]["body"]["rootpage"]
 
-    print(f"[Error]: Rootpage of table '{target_table}' not found")
+    # print(f"[Error]: Rootpage of table '{target_table}' not found")
     return -1
 
-def sql_of(database_file: io.BufferedReader, target_table: str) -> int:
+def sql_of(
+    database_file: io.BufferedReader,
+    target_table: str,
+    target_type: str = "table"
+) -> int:
     cell_offsets: list[int] = parse_leaf_cell_pointers(database_file)
     for offset in cell_offsets:
         cell_dict = parse_schema_leaf_cell(database_file, offset)
         table_name = cell_dict["record"]["body"]["tbl_name"]
-        if table_name == target_table:
+        table_type = cell_dict["record"]["body"]["type"]
+        if table_name == target_table and table_type == target_type:
             return cell_dict["record"]["body"]["sql"]
 
     print(f"[Error]: SQL of table '{target_table}' not found")
     return ""
+
+def is_indexed_column(database_file: io.BufferedReader, params: dict) -> bool:
+    if not params or ("column" not in params) or ("table" not in params):
+        return False
+    sql_create: str = sql_of(database_file, params["table"], "index")
+    if not sql_create:
+        return False
+    open_bracket_pos = sql_create.find("(")
+    close_bracket_pos = sql_create.find(")")
+    if open_bracket_pos == -1 or close_bracket_pos == -1:
+        return False
+    return sql_create[open_bracket_pos + 1:close_bracket_pos] == params["column"]
 
 # TODO: make less fragile (b/c SQL statements can have commas in more places)
 def column_names_to_indices(sql_create: str) -> dict:
@@ -568,7 +730,7 @@ def dfs_full_table_scan(
                 database_file, offset, old_page
             )
             new_params = copy.copy(params)
-            new_params["page"] = cell_dict["page_number"]
+            new_params["page"] = cell_dict["left_page_number"]
             dfs_full_table_scan(database_file, new_params, result_rows)
 
         rightmost_page: int = right_child_page_number(
@@ -578,8 +740,127 @@ def dfs_full_table_scan(
         new_params["page"] = rightmost_page
         dfs_full_table_scan(database_file, new_params, result_rows)
 
+# TODO: to implement + test
+# Modify copy and pasted code
+def index_search(
+    database_file: io.BufferedReader, params: dict, result_rows: list
+) -> None:
+    page_type_str = page_type(database_file, params["page"])
+
+    if page_type_str != "index_leaf" and page_type_str != "index_interior":
+        return
+
+    if page_type_str == "index_leaf":
+        print(f"Page {params["page"]} is an index leaf page")
+        cell_offsets: list[int] = parse_leaf_cell_pointers(
+            database_file, params["page"]
+        )
+        # print(f"Cell offsets: {cell_offsets}")
+        for offset in cell_offsets:
+            cell_dict = parse_index_leaf_cell(
+                database_file, offset, params["page"],
+                params["integer_primary_key_column_pos"]
+            )
+            # Below is working
+            # print(f"Leaf cell dict at offset {offset}:\n{cell_dict}")
+            # record_dict = cell_dict["record"]["body"]
+
+    #         if (
+    #             params["where_value"] and
+    #             record_dict[params["where_column_pos"]] != params["where_value"]
+    #         ):
+    #             continue
+
+    #         row: list[str] = []
+    #         for column_index in params["column_indices"]:
+    #             if row:
+    #                 row.append("|")
+    #             row.append(str(record_dict[column_index]))
+    #         result_rows.append("".join(row))
+    #     return
+
+    if page_type_str == "index_interior":
+        print(f"Page {params["page"]} is an index interior page")
+        cell_offsets: list[int] = parse_interior_cell_pointers(
+            database_file, params["page"]
+        )
+        old_page = copy.copy(params["page"])
+        for offset in cell_offsets:
+            cell_dict = parse_index_interior_cell(
+                database_file, offset, old_page
+            )
+            print(f"Interior cell dict at offset {offset}:\n{cell_dict}")
+            # new_params = copy.copy(params)
+            # new_params["page"] = cell_dict["left_page_number"]
+            # index_search(database_file, new_params, result_rows)
+
+        # rightmost_page: int = right_child_page_number(
+        #     database_file, old_page
+        # )
+        # new_params = copy.copy(params)
+        # new_params["page"] = rightmost_page
+        # index_search(database_file, new_params, result_rows)
+
+# TODO: to implement + test
+# Modify copy + pasted code
+def table_search(
+    database_file: io.BufferedReader, params: dict, result_rows: list
+) -> None:
+    page_type_str = page_type(database_file, params["page"])
+
+    # if page_type_str != "table_leaf" and page_type_str != "table_interior":
+    #     return
+
+    # if page_type_str == "table_leaf":
+    #     cell_offsets: list[int] = parse_leaf_cell_pointers(
+    #         database_file, params["page"]
+    #     )
+    #     for offset in cell_offsets:
+    #         cell_dict = parse_table_leaf_cell(
+    #             database_file, offset, params["page"],
+    #             params["integer_primary_key_column_pos"]
+    #         )
+    #         record_dict = cell_dict["record"]["body"]
+
+    #         if (
+    #             params["where_value"] and
+    #             record_dict[params["where_column_pos"]] != params["where_value"]
+    #         ):
+    #             continue
+
+    #         row: list[str] = []
+    #         for column_index in params["column_indices"]:
+    #             if row:
+    #                 row.append("|")
+    #             row.append(str(record_dict[column_index]))
+    #         result_rows.append("".join(row))
+    #     return
+
+    # if page_type_str == "table_interior":
+    #     cell_offsets: list[int] = parse_interior_cell_pointers(
+    #         database_file, params["page"]
+    #     )
+    #     old_page = copy.copy(params["page"])
+    #     for offset in cell_offsets:
+    #         cell_dict = parse_table_interior_cell(
+    #             database_file, offset, old_page
+    #         )
+    #         new_params = copy.copy(params)
+    #         new_params["page"] = cell_dict["left_page_number"]
+    #         table_search(database_file, new_params, result_rows)
+
+    #     rightmost_page: int = right_child_page_number(
+    #         database_file, old_page
+    #     )
+    #     new_params = copy.copy(params)
+    #     new_params["page"] = rightmost_page
+    #     table_search(database_file, new_params, result_rows)
 
 def main() -> None:
+    if len(sys.argv) != CLI_ARGUMENTS_COUNT:
+        print("Usage: ./your_program.sh <SQLITE_DATABASE> <SQLITE_COMMAND>")
+        return
+
     database_file_path = sys.argv[1]
     command = sys.argv[2]
     database_file: io.BufferedReader = open(database_file_path, "rb")
@@ -625,25 +906,50 @@ def main() -> None:
             column_indices.append(col_name_to_pos[column])
         where_column_pos = -1
         where_value = None
-        if "where_column" in sql_dict:
+        is_valid_where_column = (
+            "where_column" in sql_dict and
+            sql_dict["where_column"] in col_name_to_pos
+        )
+        index_col_rootpage = -1
+        if is_valid_where_column:
             where_column_pos = col_name_to_pos[sql_dict["where_column"]]
             where_value = sql_dict["where_value"]
+
+        index_params = {
+            "column": sql_dict["where_column"], "table": sql_dict["table"]
+        }
+        if is_indexed_column(database_file, index_params):
+            index_col_rootpage = rootpage_of(
+                database_file, sql_dict["table"].lower(), "index"
+            )
+
         rowid_column_pos = col_name_to_pos["_integer_primary_key"]
 
         params = {
             "page": rootpage,
             "column_indices": column_indices,
-            "where_column_pos": where_column_pos,
-            "where_value": where_value,
             "integer_primary_key_column_pos": rowid_column_pos
         }
-        rows = []
-        dfs_full_table_scan(database_file, params, rows)
 
-        # TODO: fix bug that sometimes causes tests to fail for some reason
-        rows_str: str = "\n".join(rows)
+        if where_column_pos != -1 and where_value:
+            params["where_column_pos"] = where_column_pos
+            params["where_value"] = where_value
 
-        print(rows_str)
+        if index_col_rootpage != -1:
+            params["index_col_rootpage"] = index_col_rootpage
+            # params["index_col_pos"] = 
+
+        # DEBUG: test
+        # print(f"Params: {params}")
+        # params["page"] = index_col_rootpage
+        params["page"] = 1668
+        rowids: list[int] = []
+        index_search(database_file, params, rowids)
+
+        # rows = []
+        # dfs_full_table_scan(database_file, params, rows)
+        # rows_str: str = "\n".join(rows)
+        # print(rows_str)
     else:
         print(f"Invalid command: {command}")
 

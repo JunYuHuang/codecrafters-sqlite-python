@@ -103,19 +103,29 @@ git push origin master
                     - 64-bit signed int key(s)
                     - store data in leaf nodes only
                     - leaf nodes (pages)
-                        - composition = 
-                            - keys +
-                            - data
+                        - composition = `n` * cells, where each cell is:
+                            - (`K` + 1) pointer to left child node (page) +
+                            - `K` key (rowid)
+                            - data (record)
                     - interior nodes (pages)
-                        - composition =
-                            - `K` keys +
-                            - (`K` + 1) pointers to child nodes (pages)
+                        - composition = `n` * cells, where each cell is:
+                            - (`K` + 1) pointer to left child node (page) +
+                            - `K` key (rowid)
                         - pointers = 32-bit unsigned int page number of child
                         - `K` >= 2, except when page 1 (root node) is an interior node
                     - `id` primary keys with `autoincrement` property point to cell's `rowid`
                 - "index b-trees"
                     - arbitrary-lengthed (int?) keys
                     - store 0 data
+                    - leaf nodes / pages:
+                        - composition = `n` * cells, where each cell is:
+                            - (`K` + 1) pointer to left child node (page) +
+                            - `K` key (rowid) ?
+                            - data / payload (record)
+                    - interior nodes / pages:
+                        - composition = `n` * cells, where each cell is:
+                            - (`K` + 1) pointer to left child node (page) +
+                            - data / payload (record)
                 - b-tree page is interior or leaf page
             - values are only stored in bottom-most leaf nodes, not intermediary nodes
     - SQLite database = 1+ pages
@@ -230,33 +240,23 @@ git push origin master
             ```
 - PEDAC: Data Structures And Algorithms
     - helper functions
-        - TODO
+        - `rootpage_of(database_file: file, target_table: string) -> integer`
+            - modify to accept another parameter - string `type`
+            - modify to make it work when called with the name of an SQLite index
+            - DONE
+        - `parse_index_leaf_cell(database_file: file, cell_offset: integer, page: integer, integer_primary_key_column_pos: integer) -> hashmap`
+            - DONE
+        - `parse_index_interior_cell(database_file: file, cell_offset: integer, page: integer) -> hashmap`
+            - DONE
+        - `index_search(database_file: file, params: hashmap, result_rows: array) -> array`
+            - WIP
+        - `table_search(database_file: file, params: hashmap, result_rows: array) -> array`
+            - TODO
     - set string `database_file_path` to `argv[1]`
     - set string `command` to `argv[2]`
     - open file (descriptor) object `database_file` from path `database_file_path` as bytes with read permissions
     - if `command` follows the regex `SELECT <col 1>, ...<col N> FROM <table> WHERE <col> = '<value>'`,
-        - set hashmap `sql_dict` to `parse_sql_select_multi_column(command)`
-        - set string `table` to `sql_dict["table"]`
-        - set string `sql_create` to `sql_of(database_file, table)`
-        - set int array `column_indices` empty
-        - for int index `i` from 0 to `sql_dict["columns"]` exclusive,
-            - push `column_index_of(sql_create, sql_dict["columns"][i])` to `column_indices`
-        - set int `where_column_index` to `column_index_of(sql_create, sql_dict["where_column"])`
-        - set string `where_value` to `sql_dict["where_value"]`
-        - set string `rootpage` to `rootpage_of(database_file, table)`
-        - set string array `rows` empty
-        - set int array `cell_offsets` to `parse_cell_pointers(database_file, offset)`
-        - for int `offset` in `cell_offsets`,
-            - set hashmap `cell_dict` to `parse_leaf_cell(database_file, offset, rootpage)`
-            - if `cell_dict["record"]["body"][where_column_index]` is not `where_value`,
-                - skip to next iteration
-            - set string `row` empty
-            - for int index `i` from 0 to length of `column_indices` exclusive,
-                - if `row` is empty string,
-                    - append `row` with `cell_dict["record"]["body"][column_index]`
-                - else,
-                    - append `row` with `|` + `cell_dict["record"]["body"][column_index]`
-            - push `row` to `rows`
-        - set string `rows_str` to joining each string in `rows` with a newline char `\n`
-        - print `rows_str`
+        - if `where` clause of `command` is set to a column that is indexed on the table,
+            - set int `index_rootpage` to `rootpage_of(database_file, index_name, "index")`
+        - TODO
     - close file object at path `database_file`
