@@ -762,7 +762,7 @@ def index_search(
                 params["integer_primary_key_column_pos"]
             )
             # Below is working
-            # print(f"Leaf cell dict at offset {offset}:\n{cell_dict}")
+            print(f"Leaf cell dict at offset {offset}:\n{cell_dict}")
             # record_dict = cell_dict["record"]["body"]
 
     #         if (
@@ -794,16 +794,17 @@ def index_search(
             # new_params["page"] = cell_dict["left_page_number"]
             # index_search(database_file, new_params, result_rows)
 
-        # rightmost_page: int = right_child_page_number(
-        #     database_file, old_page
-        # )
+        rightmost_page: int = right_child_page_number(
+            database_file, old_page
+        )
+        print(f"Rightmost page number: {rightmost_page}")
         # new_params = copy.copy(params)
         # new_params["page"] = rightmost_page
         # index_search(database_file, new_params, result_rows)
 
 # TODO: to implement + test
 # Modify copy + pasted code
-def table_search(
+def table_search_by_id(
     database_file: io.BufferedReader, params: dict, result_rows: list
 ) -> None:
     page_type_str = page_type(database_file, params["page"])
@@ -942,7 +943,10 @@ def main() -> None:
         # DEBUG: test
         # print(f"Params: {params}")
         # params["page"] = index_col_rootpage
-        params["page"] = 1668
+        # params["page"] = 4
+        # params["page"] = 1849
+        # params["page"] = 1759
+        params["page"] = 1760
         rowids: list[int] = []
         index_search(database_file, params, rowids)
 
