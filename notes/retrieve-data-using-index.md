@@ -252,9 +252,12 @@ git push origin master
             - TODO: implement modified binary search algorithm
             - find index interior and leaf nodes whose indexed column values are <= value and < value + 1 page / node?
             - returns array of rowids / primary key IDs in ASCENDING order
-                - recursive order is <= value (left node), value < +1 (right node), root node?  
+                - recursive order is <= value (left node), value < +1 (right node), root node?
+            - if first record matches indexed column,
+                - do a recursive call on the adjacent previous age
+            - if last record matches indexed column,
+                - do a recursive call on the adjacent next page
         - `table_search_by_id(database_file: file, params: hashmap) -> hashmap`
-            - TODO: implement modified binary search algorithm
             - set string `page_type_str` empty
             - set int array `cell_offsets` empty
             - set hashmap `res` empty
@@ -268,9 +271,7 @@ git push origin master
                     - set int `right_pos` to `cell_offsets`.length - 1
                     - while `left_pos` <= `right_pos`,
                         - set int `mid_pos` to (`right_pos` - `left_pos`) integer divided by 2
-                        - set hashmap `left_cell_dict` to `parse_table_leaf_cell(database_file, cell_offsets[left_pos], params["page"], params["integer_primary_key_column"])`
                         - set hashmap `mid_cell_dict` to `parse_table_leaf_cell(database_file, cell_offsets[mid_pos], params["page"], params["integer_primary_key_column"])`
-                        - set hashmap `right_cell_dict` to `parse_table_leaf_cell(database_file, cell_offsets[right_pos], params["page"], params["integer_primary_key_column"])`
                         - if `params["id"]` equals `mid_cell_dict["rowid"]`,
                             - add selected columns (from `params["column_indices"]`) and their values by index in `mid_cell_dict` as key-value entries to `res`
                             - return `res`
@@ -283,7 +284,18 @@ git push origin master
                     - set `cell_offsets` to `parse_table_interior_cell(...parameters)`
                     - set int `left_pos` to `0`
                     - set int `right_pos` to `cell_offsets`.length - 1
-                    - TODO
+                    - while `left_pos` <= `right_pos`,
+                        - set int `mid_pos` to (`right_pos` - `left_pos`) integer divided by 2
+                        - set hashmap `mid_cell_dict` to `parse_table_interior_cell(database_file, cell_offsets[mid_pos], params["page"])`
+                        - set int `left_of_mid_pos` to `mid_pos` if `mid_pos` is 0, else set it to `mid_pos` - 1
+                        - set hashmap `left_of_mid_dict` to `mid_cell_dict` if `mid_pos` is `left_of_mid_pos`, else set it to `parse_table_interior_cell(database_file, cell_offsets[left_of_mid_pos], params["page"])`
+                        - if `left_of_mid_dict["rowid"]` < `params["id"]` and `params["id"]` <= `mid_dict["rowid"]`,
+                            - return recursive call on `mid_dict["left_page_number"]`
+                        - else if `mid_dict["rowid"]` < `params["id"]`,
+                            - set `left_pos` to `mid_pos` + 1
+                        - else if `params["id"]` < `left_of_mid_pos["rowid"]`,
+                            - set `right_pos` to `left_of_mid_pos` - 1
+                    - print error message and return empty hashmap
     - set string `database_file_path` to `argv[1]`
     - set string `command` to `argv[2]`
     - open file (descriptor) object `database_file` from path `database_file_path` as bytes with read permissions
